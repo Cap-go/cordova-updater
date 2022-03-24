@@ -16,7 +16,16 @@
   "keywords": [
     "ecosystem:cordova",
     "cordova-android",
-    "cordova-ios"
+    "cordova-ios",
+    "plugin",
+    "OTA",
+    "manual update",
+    "live update",
+    "auto update",
+    "ionic",
+    "appflow alternative",
+    "capgo",
+    "native"
   ],
   "author": "Martin Donadieu",
   "license": "AGPL-3.0-only",
