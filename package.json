@@ -1,0 +1,27 @@
+{
+  "name": "cordova-updater",
+  "version": "1.0.0",
+  "description": "OTA update for cordova apps",
+  "cordova": {
+    "id": "cordova-updater",
+    "platforms": [
+      "android",
+      "ios"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Cap-go/cordova-updater.git"
+  },
+  "keywords": [
+    "ecosystem:cordova",
+    "cordova-android",
+    "cordova-ios"
+  ],
+  "author": "Martin Donadieu",
+  "license": "AGPL-3.0-only",
+  "bugs": {
+    "url": "https://github.com/Cap-go/cordova-updater/issues"
+  },
+  "homepage": "https://github.com/Cap-go/cordova-updater#readme"
+}
