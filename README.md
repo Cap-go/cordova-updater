@@ -286,3 +286,4 @@ On iOS, Apple don't allow you to show a message when the app is updated, so you 
 ### Inspiration
 
 - [capacitor-updater](https://github.dev/Capgo/capacitor-updater)
+- [cordova-plugin-ionic](https://github.dev/ionic-team/cordova-plugin-ionic)

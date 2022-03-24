@@ -9,6 +9,7 @@
         <config-file parent="/*" target="res/xml/config.xml">
             <feature name="CordovaUpdater">
                 <param name="android-package" value="cordova-updater.CordovaUpdater" />
+                <param name="onload" value="true" />
             </feature>
         </config-file>
         <config-file parent="/*" target="AndroidManifest.xml" />
@@ -20,6 +21,7 @@
         <config-file parent="/*" target="config.xml">
             <feature name="CordovaUpdater">
                 <param name="ios-package" value="CordovaUpdater" />
+                <param name="onload" value="true" />
             </feature>
         </config-file>
         <source-file src="src/ios/CordovaUpdater.m" />
