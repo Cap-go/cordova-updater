@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<plugin id="cordova-updater" version="1.0" xmlns="http://apache.org/cordova/ns/plugins/1.0" xmlns:android="http://schemas.android.com/apk/res/android">
+<plugin id="cordova_updater" version="1.0" xmlns="http://apache.org/cordova/ns/plugins/1.0" xmlns:android="http://schemas.android.com/apk/res/android">
     <name>CordovaUpdater</name>
     <js-module name="CordovaUpdater" src="www/CordovaUpdater.js">
         <clobbers target="cordova.plugins.CordovaUpdater" />
@@ -8,12 +8,12 @@
         <framework src="com.android.volley:volley:1.2.1" />
         <config-file parent="/*" target="res/xml/config.xml">
             <feature name="CordovaUpdater">
-                <param name="android-package" value="cordova-updater.CordovaUpdater" />
+                <param name="android-package" value="cordova-_updater.CordovaUpdater" />
                 <param name="onload" value="true" />
             </feature>
         </config-file>
         <config-file parent="/*" target="AndroidManifest.xml" />
-        <source-file src="src/android/CordovaUpdater.java" target-dir="src/cordova-updater/CordovaUpdater" />
+        <source-file src="src/android/CordovaUpdater.java" target-dir="src/cordova_updater/CordovaUpdater" />
     </platform>
     <platform name="ios">
         <pod name="SSZipArchive" />

@@ -1,4 +1,4 @@
-package cordova-updater;
+package cordova_updater;
 
 import org.apache.cordova.CordovaPlugin;
 import org.apache.cordova.CallbackContext;
