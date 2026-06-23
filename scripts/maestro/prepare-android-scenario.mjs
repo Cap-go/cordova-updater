@@ -76,18 +76,20 @@ const env = {
   CAPGO_DIRECT_UPDATE: scenario.directUpdate,
 };
 
-await runCommand('bun', ['run', 'build'], {
-  cwd: exampleAppDir,
-  env,
-});
-
-
 await runCommand('bun', ['scripts/maestro/sync-cordova-config.mjs'], {
   cwd: repoRoot,
   env,
 });
 
+await runCommand('npm', ['ci'], {
+  cwd: exampleAppDir,
+  env,
+});
 
+await runCommand('npm', ['run', 'build'], {
+  cwd: exampleAppDir,
+  env,
+});
 
 
 // Avoid `cordova platform rm` — it runs `npm uninstall cordova-android`, which breaks when
@@ -97,10 +99,20 @@ if (fs.existsSync(androidPlatformDir)) {
   fs.rmSync(androidPlatformDir, { recursive: true, force: true });
 }
 
-await runCommand('npx', ['cordova', 'platform', 'add', 'android'], {
+await runCommand('npx', ['cordova', 'platform', 'add', 'android', '--nosave'], {
   cwd: exampleAppDir,
   env,
 });
+
+const pluginVariableArgs = buildPluginVariableArgs(env);
+await runCommand(
+  'npx',
+  ['cordova', 'plugin', 'add', '../', '--link', '--nosave', ...pluginVariableArgs],
+  {
+    cwd: exampleAppDir,
+    env,
+  },
+);
 
 await runCommand('npx', ['cordova', 'prepare', 'android'], {
   cwd: exampleAppDir,
