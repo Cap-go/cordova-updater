@@ -62,6 +62,18 @@ function buildPluginVariableArgs(env) {
 
 
 
+
+function installLocalPluginSymlink() {
+  const scopedPluginsDir = path.join(exampleAppDir, 'plugins', '@capgo');
+  const pluginDir = path.join(scopedPluginsDir, 'cordova-updater');
+  fs.mkdirSync(scopedPluginsDir, { recursive: true });
+  if (fs.existsSync(pluginDir)) {
+    fs.rmSync(pluginDir, { recursive: true, force: true });
+  }
+  fs.symlinkSync(path.resolve(repoRoot), pluginDir, 'dir');
+}
+
+
 async function stripUpdaterPluginFromCordovaMetadata() {
   const configPath = path.join(exampleAppDir, 'config.xml');
   let xml = fs.readFileSync(configPath, 'utf8');
@@ -136,15 +148,11 @@ if (!fs.existsSync(pluginJsPath)) {
   });
 }
 
-const pluginVariableArgs = buildPluginVariableArgs(env);
-await runCommand(
-  'npx',
-  ['cordova', 'plugin', 'add', pluginPath, '--link', '--nosave', ...pluginVariableArgs],
-  {
-    cwd: exampleAppDir,
-    env,
-  },
-);
+installLocalPluginSymlink();
+await runCommand('bun', ['scripts/maestro/sync-cordova-config.mjs'], {
+  cwd: repoRoot,
+  env,
+});
 
 await runCommand('npx', ['cordova', 'prepare', 'android'], {
   cwd: exampleAppDir,
