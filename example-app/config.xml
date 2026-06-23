@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<widget id="app.capgo.updater" version="1.0.0" xmlns="http://www.w3.org/ns/widgets">
+<widget id="app.capgo.updater" version="1.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:android="http://schemas.android.com/apk/res/android">
     <name>Updater Example</name>
     <description>Example app for @capgo/cordova-updater Maestro harness</description>
     <content src="index.html" />
@@ -58,4 +58,9 @@
         <variable name="SHAKE_MENU" value="false" />
         <variable name="AUTO_SPLASHSCREEN" value="false" />
     </plugin>
+    <platform name="android">
+        <edit-config file="app/src/main/AndroidManifest.xml" mode="merge" target="/manifest/application">
+            <application android:usesCleartextTraffic="true" />
+        </edit-config>
+    </platform>
 </widget>
