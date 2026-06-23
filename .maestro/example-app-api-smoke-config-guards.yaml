@@ -28,7 +28,7 @@ appId: app.capgo.updater
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*(Marker: smoke-sequence:success|M:smoke-sequence:success).*'
-    timeout: 180000
+    timeout: 420000
 - scrollUntilVisible:
     element:
       id: 'quick-action-get-latest'

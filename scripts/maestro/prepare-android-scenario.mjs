@@ -64,12 +64,13 @@ function buildPluginVariableArgs(env) {
 
 
 function installLocalPluginSymlink() {
-  const scopedPluginsDir = path.join(exampleAppDir, 'plugins', '@capgo');
+  const pluginsRoot = path.join(exampleAppDir, 'plugins');
+  const scopedPluginsDir = path.join(pluginsRoot, '@capgo');
   const pluginDir = path.join(scopedPluginsDir, 'cordova-updater');
-  fs.mkdirSync(scopedPluginsDir, { recursive: true });
-  if (fs.existsSync(pluginDir)) {
-    fs.rmSync(pluginDir, { recursive: true, force: true });
+  if (fs.existsSync(pluginsRoot)) {
+    fs.rmSync(pluginsRoot, { recursive: true, force: true });
   }
+  fs.mkdirSync(scopedPluginsDir, { recursive: true });
   fs.symlinkSync(path.resolve(repoRoot), pluginDir, 'dir');
 }
 
@@ -126,9 +127,14 @@ await runCommand('bun', ['scripts/maestro/sync-cordova-config.mjs'], {
 
 // Avoid `cordova platform rm` — it runs `npm uninstall cordova-android`, which breaks when
 // example-app deps were installed with bun (no package-lock.json).
-const androidPlatformDir = path.join(exampleAppDir, 'platforms', 'android');
+const platformsDir = path.join(exampleAppDir, 'platforms');
+const androidPlatformDir = path.join(platformsDir, 'android');
+const iosPlatformDir = path.join(platformsDir, 'ios');
 if (fs.existsSync(androidPlatformDir)) {
   fs.rmSync(androidPlatformDir, { recursive: true, force: true });
+}
+if (fs.existsSync(iosPlatformDir)) {
+  fs.rmSync(iosPlatformDir, { recursive: true, force: true });
 }
 
 // Installing the plugin during `platform add` uses npm `file:..` and can hit ENAMETOOLONG on CI.
@@ -149,15 +155,31 @@ if (!fs.existsSync(pluginJsPath)) {
 }
 
 installLocalPluginSymlink();
-await runCommand('bun', ['scripts/maestro/sync-cordova-config.mjs'], {
-  cwd: repoRoot,
-  env,
-});
+
+const pluginDir = path.join(exampleAppDir, 'plugins', '@capgo', 'cordova-updater');
+const pluginVariableArgs = buildPluginVariableArgs(env);
+await runCommand(
+  'npx',
+  ['cordova', 'plugin', 'add', pluginDir, '--link', '--nosave', ...pluginVariableArgs],
+  {
+    cwd: exampleAppDir,
+    env,
+  },
+);
 
 await runCommand('npx', ['cordova', 'prepare', 'android'], {
   cwd: exampleAppDir,
   env,
 });
+
+const nativeConfigPath = path.join(exampleAppDir, 'platforms', 'android', 'app', 'src', 'main', 'res', 'xml', 'config.xml');
+const nativePluginSource = path.join(exampleAppDir, 'platforms', 'android', 'app', 'src', 'main', 'java', 'CordovaUpdaterPlugin.java');
+if (
+  !fs.existsSync(nativePluginSource) ||
+  !fs.readFileSync(nativeConfigPath, 'utf8').includes('CordovaUpdaterPlugin')
+) {
+  throw new Error('CordovaUpdaterPlugin was not installed into the Android platform project');
+}
 
 await runCommandWithRetries('npx', ['cordova', 'build', 'android'], {
   cwd: exampleAppDir,
