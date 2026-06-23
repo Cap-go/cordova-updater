@@ -3,11 +3,22 @@ package org.apache.cordova;
 import org.json.JSONObject;
 
 public class PluginResult {
-    public static final int Status_OK = 0;
-    public static final int Status_ERROR = 1;
-    public static final int Status_NO_RESULT = 2;
+    public enum Status {
+        NO_RESULT,
+        OK,
+        CLASS_NOT_FOUND_EXCEPTION,
+        ILLEGAL_ACCESS_EXCEPTION,
+        INSTANTIATION_EXCEPTION,
+        MALFORMED_URL_EXCEPTION,
+        IO_EXCEPTION,
+        INVALID_ACTION,
+        JSON_EXCEPTION,
+        ERROR
+    }
 
-    public PluginResult(int status) {}
-    public PluginResult(int status, JSONObject message) {}
-    public void setKeepCallback(boolean b) {}
+    public PluginResult(Status status) {}
+
+    public PluginResult(Status status, JSONObject message) {}
+
+    public void setKeepCallback(boolean keepCallback) {}
 }

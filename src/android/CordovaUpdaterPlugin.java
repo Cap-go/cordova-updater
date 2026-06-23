@@ -81,6 +81,18 @@ import org.apache.cordova.PluginResult;
 public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin implements app.capgo.cordova.updater.compat.PluginCall.CordovaPluginShim {
     public static final String TAG = "CapgoCordovaUpdater";
     private CordovaUpdaterConfig updaterConfig;
+    private android.webkit.WebView getUpdaterWebView() {
+        if (webView == null) {
+            return null;
+        }
+        android.view.View view = webView.getView();
+        if (view instanceof android.webkit.WebView) {
+            return (android.webkit.WebView) view;
+        }
+        return null;
+    }
+
+
     private UpdaterPathHandler pathHandler;
     private CordovaPluginPathHandler cordovaPathHandler;
     private final Map<String, ListenerRegistration> cordovaListeners = new ConcurrentHashMap<>();
@@ -672,8 +684,9 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         Logger.Options loggerOptions = new Logger.Options(osLogging);
         this.logger = new Logger("CapgoUpdater", loggerOptions);
 
-        this.prefs = this.getContext().getSharedPreferences("CapgoCordovaUpdaterWebView", Activity.MODE_PRIVATE);
-        this.editor = this.prefs.edit();
+        final SharedPreferences webViewPrefs =
+            this.getContext().getSharedPreferences("CapgoCordovaUpdaterWebView", Activity.MODE_PRIVATE);
+        final SharedPreferences.Editor webViewEditor = webViewPrefs.edit();
 
         try {
             this.implementation = new CapgoUpdater(logger) {
@@ -713,7 +726,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             // Removed unused OkHttpClient creation - using shared client in DownloadService instead
             this.currentVersionNative = new Version(this.updaterConfig.getString("version", pInfo.versionName));
             this.currentBuildVersion = this.getVersionCode(pInfo);
-            this.delayUpdateUtils = new DelayUpdateUtils(this.prefs, this.editor, this.currentVersionNative, logger);
+            this.delayUpdateUtils = new DelayUpdateUtils(webViewPrefs, webViewEditor, this.currentVersionNative, logger);
         } catch (final PackageManager.NameNotFoundException e) {
             logger.error("Error instantiating implementation " + e.getMessage());
             return;
@@ -724,7 +737,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
 
         boolean disableJSLogging = this.updaterConfig.getBoolean("disableJSLogging", false);
         // Set the bridge in the Logger when webView is available
-        if (cordova != null && getCordovaWebView() != null && !disableJSLogging) {
+        if (cordova != null && getUpdaterWebView() != null && !disableJSLogging) {
             
             logger.info("WebView set successfully for logging");
         } else {
@@ -1441,10 +1454,10 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
 
     private void installWebViewStatsReporter() {
         // Cordova: WebView stats reporter uses evaluateJavascript only
-        if (cordova == null || getCordovaWebView() == null) {
+        if (cordova == null || getUpdaterWebView() == null) {
             return;
         }
-        final android.webkit.WebView webView = getCordovaWebView();
+        final android.webkit.WebView webView = getUpdaterWebView();
         final String script = buildWebViewStatsReporterScript();
         webView.post(() -> webView.evaluateJavascript(script, null));
     }
@@ -2488,7 +2501,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     }
 
     private void syncKeepUrlPathFlag(final boolean enabled) {
-        if (cordova == null || getCordovaWebView() == null) {
+        if (cordova == null || getUpdaterWebView() == null) {
             return;
         }
         final String script = enabled
@@ -2498,7 +2511,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             : "(function(){try{localStorage.removeItem('" +
               KEEP_URL_FLAG_KEY +
               "');}catch(e){}delete window.__capgoKeepUrlPathAfterReload;var evt;try{evt=new CustomEvent('CapacitorUpdaterKeepUrlPathAfterReload',{detail:{enabled:false}});}catch(err){evt=document.createEvent('CustomEvent');evt.initCustomEvent('CapacitorUpdaterKeepUrlPathAfterReload',false,false,{enabled:false});}window.dispatchEvent(evt);})();";
-        getCordovaWebView().post(() -> getCordovaWebView().evaluateJavascript(script, null));
+        getUpdaterWebView().post(() -> getUpdaterWebView().evaluateJavascript(script, null));
     }
 
     private void applyCurrentBundleToBridge() {
@@ -2517,7 +2530,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             }
         }
 
-        final android.webkit.WebView webView = getCordovaWebView();
+        final android.webkit.WebView webView = getUpdaterWebView();
         if (cordova != null && webView != null) {
             cordova.getActivity().runOnUiThread(() -> {
                 if (this.keepUrlPathAfterReload) {
@@ -5464,10 +5477,6 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
 
     @Override
     public CordovaPluginPathHandler getPathHandler() {
-        
-        updaterConfig = new CordovaUpdaterConfig(cordova.getActivity());
-        this.prefs = cordova.getActivity().getSharedPreferences("CapgoCordovaUpdater", android.content.Context.MODE_PRIVATE);
-        this.editor = this.prefs.edit();
         if (pathHandler == null) {
             pathHandler = new UpdaterPathHandler();
         }
@@ -5487,7 +5496,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     }
 
     private void notifyJSListeners(String eventName, app.capgo.cordova.updater.compat.JSObject data) {
-        PluginResult result = new PluginResult(PluginResult.Status_OK, data);
+        PluginResult result = new PluginResult(PluginResult.Status.OK, data);
         result.setKeepCallback(true);
         for (ListenerRegistration registration : cordovaListeners.values()) {
             if (eventName.equals(registration.eventName)) {
@@ -5532,7 +5541,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             return;
         }
         cordovaListeners.put(listenerId, new ListenerRegistration(eventName, callbackContext));
-        PluginResult result = new PluginResult(PluginResult.Status_NO_RESULT);
+        PluginResult result = new PluginResult(PluginResult.Status.NO_RESULT);
         result.setKeepCallback(true);
         callbackContext.sendPluginResult(result);
     }

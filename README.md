@@ -60,11 +60,22 @@ Do **not** use `cordova-plugin-ionic-webview` — it bypasses Cordova's scheme h
 ```bash
 bun install
 bun run build
-bun run verify          # Android unit tests + TypeScript build
+bun run verify          # Android tests + iOS compile + TypeScript build
 bun run native:contract # Native contract tests (shared with capacitor-updater)
 ```
 
-Maestro E2E flows live under `.maestro/` (copied from `capacitor-updater`; wire them to a Cordova example app with `cordova platform add`).
+### Example app
+
+```bash
+bun run build
+cd example-app
+npm install
+npx cordova build android   # or cordova build ios
+```
+
+The example links the plugin from the repo root (`spec=".."` in `config.xml`). Cordova injects `cordova.plugins.Updater` via `plugin.xml` — no manual script tag needed in `www/index.html`.
+
+Maestro E2E flows live under `.maestro/` (copied from `capacitor-updater`; adapt `scripts/maestro/*` once you run the example on device/simulator).
 
 ## License
 

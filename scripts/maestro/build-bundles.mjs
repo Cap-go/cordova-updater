@@ -98,10 +98,21 @@ await runCommand('bun', ['run', 'build'], {
   cwd: repoRoot,
   env: process.env,
 });
-await runCommand('bun', ['install'], {
-  cwd: exampleAppDir,
-  env: process.env,
-});
+const exampleNodeModules = path.join(exampleAppDir, 'node_modules');
+try {
+  await runCommand('bun', ['install'], {
+    cwd: exampleAppDir,
+    env: process.env,
+  });
+} catch (error) {
+  const updaterPackage = path.join(exampleNodeModules, '@capgo', 'cordova-updater');
+  try {
+    await readFile(path.join(updaterPackage, 'dist', 'esm', 'index.js'));
+    console.warn(`[maestro] bun install failed but example app deps look present: ${error.message}`);
+  } catch {
+    throw error;
+  }
+}
 
 for (const scenario of selectedScenarios) {
   for (const release of scenario.releases) {

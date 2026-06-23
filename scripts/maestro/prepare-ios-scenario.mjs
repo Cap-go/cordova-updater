@@ -1,5 +1,5 @@
 import { runCommand } from './command.mjs';
-import { createBuildEnv, exampleAppDir, getScenario } from './scenarios.mjs';
+import { createBuildEnv, exampleAppDir, repoRoot, getScenario } from './scenarios.mjs';
 
 const scenarioId = process.argv[2];
 
@@ -30,7 +30,17 @@ await runCommand('bun', ['run', 'build'], {
   env,
 });
 
-await runCommand('bunx', ['cap', 'sync', 'ios'], {
+await runCommand('bun', ['scripts/maestro/sync-cordova-config.mjs'], {
+  cwd: repoRoot,
+  env,
+});
+
+await runCommand('npx', ['cordova', 'plugin', 'add', '../', '--link', '--nofetch'], {
+  cwd: exampleAppDir,
+  env,
+});
+
+await runCommand('npx', ['cordova', 'prepare', 'ios'], {
   cwd: exampleAppDir,
   env,
 });

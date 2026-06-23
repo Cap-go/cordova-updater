@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXAMPLE_DIR="$ROOT_DIR/example-app"
-APK_PATH="$EXAMPLE_DIR/android/app/build/outputs/apk/debug/app-debug.apk"
+APK_PATH="$EXAMPLE_DIR/platforms/android/app/build/outputs/apk/debug/app-debug.apk"
 RESULTS_DIR="$ROOT_DIR/maestro-results"
 SKIP_BUILD="${CAPGO_MAESTRO_SKIP_BUILD:-0}"
 SKIP_BUNDLE_BUILD="${CAPGO_MAESTRO_SKIP_BUNDLE_BUILD:-0}"
@@ -32,7 +32,7 @@ APP_ACTIVITY="${CAPGO_MAESTRO_ANDROID_ACTIVITY:-app.capgo.updater/.MainActivity}
 APP_LAUNCH_RETRIES="${CAPGO_MAESTRO_APP_LAUNCH_RETRIES:-3}"
 APP_UI_TIMEOUT_SECONDS="${CAPGO_MAESTRO_APP_UI_TIMEOUT_SECONDS:-150}"
 POST_INSTALL_STABILIZE_SECONDS="${CAPGO_MAESTRO_POST_INSTALL_STABILIZE_SECONDS:-8}"
-APP_READY_TITLE="@capgo/capacitor-updater"
+APP_READY_TITLE="@capgo/cordova-updater"
 APP_READY_ACTION="Run notifyAppReady"
 APP_ID="app.capgo.updater"
 FLOW_RETRY_PATTERN="TcpForwarder.waitFor|allocateForwarder|TimeoutException|Android driver did not start up in time|Maestro Android driver did not start up in time|UNAVAILABLE: io exception|UNAVAILABLE: Network closed|DEADLINE_EXCEEDED|waiting_for_connection|device offline|device .* not found|host:transport:emulator|Connection refused|Broken pipe|Failure calling service package|Can.t find service: package|Can.t find service: settings|Cannot access system provider: 'settings'|No service published for: input|No visible element found: id: quick-action|Could not find a visible element matching selector: id: quick-action|UiAutomation not connected|INTERNAL: UiAutomation|Assertion is false: \".*Harness: ready.*\" is visible|Assertion is false: \".*(Marker: smoke-sequence:success|M:smoke-sequence:success).*\" is visible|Assertion is false: \".*(Marker: persisted:success|M:persisted:success).*\" is visible"
@@ -463,13 +463,13 @@ if [[ -z "$TIMEOUT_CMD" ]]; then
   exit 1
 fi
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "node is required to run Capacitor CLI commands." >&2
+if ! command -v npx >/dev/null 2>&1; then
+  echo "npx is required to run Cordova CLI commands." >&2
   exit 1
 fi
 
-if ! node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 22 ? 0 : 1)"; then
-  echo "Node.js >=22 is required because Capacitor CLI no longer supports older versions." >&2
+if ! (cd "$EXAMPLE_DIR" && npx cordova -v >/dev/null 2>&1); then
+  echo "Cordova CLI is required. Run bun install in example-app." >&2
   exit 1
 fi
 

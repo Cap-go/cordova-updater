@@ -66,7 +66,7 @@
         </config-file>
 
         <resource-file src="src/android/capgo-updater.xml" target="res/values/capgo-updater.xml"/>
-        <config-file target="res/values/capgo-updater.xml" parent="/resources">
+                <config-file target="res/values/capgo-updater.xml" parent="/resources">
             <string name="capgo_updater_app_id">$APP_ID</string>
             <string name="capgo_updater_default_channel">$DEFAULT_CHANNEL</string>
             <string name="capgo_updater_update_url">$UPDATE_URL</string>
@@ -124,6 +124,7 @@
         <source-file src="src/android/app/capgo/cordova/updater/ShakeDetector.java" target-dir="src/app/capgo/cordova/updater"/>
         <source-file src="src/android/app/capgo/cordova/updater/ShakeMenu.java" target-dir="src/app/capgo/cordova/updater"/>
         <source-file src="src/android/app/capgo/cordova/updater/ThreeFingerPinchDetector.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/compat/JSArray.java" target-dir="src/app/capgo/cordova/updater/compat"/>
         <source-file src="src/android/app/capgo/cordova/updater/compat/JSObject.java" target-dir="src/app/capgo/cordova/updater/compat"/>
         <source-file src="src/android/app/capgo/cordova/updater/compat/PluginCall.java" target-dir="src/app/capgo/cordova/updater/compat"/>
     </platform>
@@ -153,6 +154,9 @@
         <source-file src="src/ios/BundleStatus.swift"/>
         <source-file src="src/ios/CapgoUpdater.swift"/>
         <source-file src="src/ios/CordovaUpdaterPlugin.swift"/>
+        <source-file src="src/ios/CordovaPluginCall.swift"/>
+        <source-file src="src/ios/CordovaCompat.swift"/>
+        <source-file src="src/ios/CordovaUpdaterCommands.swift"/>
         <source-file src="src/ios/CryptoCipher.swift"/>
         <source-file src="src/ios/DelayCondition.swift"/>
         <source-file src="src/ios/DelayUntilNext.swift"/>

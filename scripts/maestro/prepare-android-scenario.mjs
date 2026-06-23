@@ -1,5 +1,6 @@
+import path from 'node:path';
 import { runCommand } from './command.mjs';
-import { createBuildEnv, exampleAppDir, getScenario } from './scenarios.mjs';
+import { createBuildEnv, exampleAppDir, repoRoot, getScenario } from './scenarios.mjs';
 
 async function runCommandWithRetries(command, args, options, maxAttempts = 3) {
   let attempt = 1;
@@ -22,6 +23,38 @@ async function runCommandWithRetries(command, args, options, maxAttempts = 3) {
     }
   }
 }
+
+
+function buildPluginVariableArgs(env) {
+  const keys = [
+    'APP_ID',
+    'DEFAULT_CHANNEL',
+    'UPDATE_URL',
+    'CHANNEL_URL',
+    'STATS_URL',
+    'AUTO_UPDATE',
+    'DIRECT_UPDATE',
+    'PUBLIC_KEY',
+    'APP_READY_TIMEOUT',
+    'ALLOW_MODIFY_URL',
+    'ALLOW_MODIFY_APP_ID',
+    'ALLOW_MANUAL_BUNDLE_ERROR',
+    'ALLOW_SET_DEFAULT_CHANNEL',
+    'PERSIST_CUSTOM_ID',
+    'PERSIST_MODIFY_URL',
+    'SHAKE_MENU',
+    'AUTO_SPLASHSCREEN',
+  ];
+
+  return keys.flatMap((key) => {
+    const value = env[key] ?? env[`CAPGO_${key}`];
+    if (value == null || value === '') {
+      return [];
+    }
+    return [`--variable=${key}=${value}`];
+  });
+}
+
 
 const scenarioId = process.argv[2];
 
@@ -47,12 +80,31 @@ await runCommand('bun', ['run', 'build'], {
   env,
 });
 
-await runCommand('bunx', ['cap', 'sync', 'android'], {
+
+await runCommand('bun', ['scripts/maestro/sync-cordova-config.mjs'], {
+  cwd: repoRoot,
+  env,
+});
+
+
+
+
+await runCommand('npx', ['cordova', 'platform', 'rm', 'android', '--nosave'], {
   cwd: exampleAppDir,
   env,
 });
 
-await runCommandWithRetries('./gradlew', ['assembleDebug'], {
-  cwd: `${exampleAppDir}/android`,
+await runCommand('npx', ['cordova', 'platform', 'add', 'android'], {
+  cwd: exampleAppDir,
+  env,
+});
+
+await runCommand('npx', ['cordova', 'prepare', 'android'], {
+  cwd: exampleAppDir,
+  env,
+});
+
+await runCommandWithRetries('npx', ['cordova', 'build', 'android'], {
+  cwd: exampleAppDir,
   env,
 });

@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@capgo/cordova-updater Live Update Harness</title>
+    <link rel="stylesheet" href="/src/style.css" />
     <script>
       const probe = (globalThis.__capgoProbe = {
         htmlLoadedAt: new Date().toISOString(),
@@ -25,9 +26,6 @@
 
       console.log('[Harness] inline boot', probe.htmlLoadedAt);
     </script>
-    <script src="cordova.js"></script>
-    <script type="module" crossorigin src="/assets/manual-zip-builtin/index.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/manual-zip-builtin/index.css">
   </head>
   <body>
     <main class="container">
@@ -164,5 +162,6 @@
         <pre id="debug-output">Booting updater test harness…</pre>
       </section>
     </main>
+    <script type="module" src="/src/main.js"></script>
   </body>
 </html>
