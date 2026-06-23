@@ -1,0 +1,86 @@
+{
+  "name": "@capgo/cordova-updater",
+  "version": "8.0.0",
+  "license": "MPL-2.0",
+  "description": "Live update Cordova plugin for Capgo",
+  "main": "dist/plugin.cjs.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "unpkg": "dist/plugin.js",
+  "files": [
+    "dist/",
+    "src/android/",
+    "src/ios/",
+    "plugin.xml"
+  ],
+  "author": "Martin Donadieu <martin@capgo.app>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Cap-go/cordova-updater.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Cap-go/cordova-updater/issues"
+  },
+  "homepage": "https://capgo.app/docs/plugins/updater/",
+  "keywords": [
+    "cordova",
+    "live updates",
+    "live update",
+    "updates",
+    "auto update",
+    "capgo",
+    "plugin",
+    "OTA",
+    "ionic",
+    "native"
+  ],
+  "scripts": {
+    "bootstrap": "./scripts/bootstrap.sh",
+    "verify": "bun run verify:android && bun run verify:web",
+    "verify:web": "bun run build",
+    "verify:android": "cd android && ./gradlew clean test && cd ..",
+    "verify:ios": "echo 'Cordova iOS: add platforms in example-app and build (Swift bridge in progress)'",
+    "native:contract": "bun run native:contract:android",
+    "test:maestro": "./scripts/maestro/run-android-live-update.sh",
+    "test:maestro:android": "./scripts/test-maestro-android.sh",
+    "test:maestro:ios": "./scripts/maestro/run-ios-live-update.sh",
+    "test:maestro:ios:smoke": "./scripts/test-maestro-ios.sh",
+    "lint": "bun run eslint && bun run prettier -- --check",
+    "fmt": "bun run eslint -- --fix && bun run prettier -- --write",
+    "eslint": "eslint . --ext .ts",
+    "prettier": "prettier-pretty-check \"**/*.{css,html,ts,js,java}\" --plugin=prettier-plugin-java",
+    "build": "bun run clean && tsc && rollup -c rollup.config.mjs",
+    "clean": "rimraf ./dist",
+    "watch": "tsc --watch",
+    "prepublishOnly": "bun run build",
+    "example:install": "cd example-app && npm install",
+    "example:build": "bun run build && cd example-app && npm install",
+    "native:contract:android": "cd android && ./gradlew testDebugUnitTest --tests app.capgo.cordova.updater.NativeContractTest && cd ..",
+    "test": "bun run test:android",
+    "test:android": "cd android && ./gradlew test && cd .."
+  },
+  "devDependencies": {
+    "@ionic/eslint-config": "^0.4.0",
+    "@ionic/prettier-config": "^4.0.0",
+    "@types/node": "^24.3.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-import": "^2.32.0",
+    "prettier": "^3.6.2",
+    "prettier-plugin-java": "^2.7.4",
+    "rimraf": "^6.0.1",
+    "rollup": "^4.50.0",
+    "typescript": "^5.9.2",
+    "prettier-pretty-check": "^0.2.0"
+  },
+  "prettier": "@ionic/prettier-config",
+  "eslintConfig": {
+    "extends": "@ionic/eslint-config/recommended"
+  },
+  "cordova": {
+    "id": "@capgo/cordova-updater",
+    "platforms": [
+      "android",
+      "ios"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='utf-8'?>
+<widget id="app.capgo.cordova.updater.example" version="1.0.0" xmlns="http://www.w3.org/ns/widgets">
+    <name>Cordova Updater Example</name>
+    <description>Example app for @capgo/cordova-updater</description>
+    <content src="index.html" />
+    <access origin="*" />
+    <allow-intent href="http://*/*" />
+    <allow-intent href="https://*/*" />
+    <preference name="APP_ID" value="capgo-cordova-updater-example" />
+    <preference name="UPDATE_URL" value="https://plugin.capgo.app/updates" />
+    <preference name="CHANNEL_URL" value="https://plugin.capgo.app/channel_self" />
+    <preference name="STATS_URL" value="https://plugin.capgo.app/stats" />
+    <preference name="DEFAULT_CHANNEL" value="production" />
+    <preference name="AUTO_UPDATE" value="off" />
+    <plugin name="@capgo/cordova-updater" spec=".." />
+</widget>

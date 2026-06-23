@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
+        id="@capgo/cordova-updater"
+        version="8.0.0">
+
+    <name>Updater</name>
+    <description>Cordova plugin for Capgo live updates (OTA).</description>
+    <license>MPL-2.0</license>
+    <keywords>cordova,live update,remote update,ota,capgo</keywords>
+    <repo>https://github.com/Cap-go/cordova-updater.git</repo>
+    <issue>https://github.com/Cap-go/cordova-updater/issues</issue>
+
+    <engines>
+        <engine name="cordova" version=">=12.0.0"/>
+        <engine name="cordova-android" version=">=13.0.0"/>
+        <engine name="cordova-ios" version=">=7.0.0"/>
+    </engines>
+
+    <js-module src="dist/plugin.js" name="Updater">
+        <clobbers target="cordova.plugins.Updater"/>
+    </js-module>
+
+    <preference name="APP_ID" default=" "/>
+    <preference name="DEFAULT_CHANNEL" default=" "/>
+    <preference name="UPDATE_URL" default="https://plugin.capgo.app/updates"/>
+    <preference name="CHANNEL_URL" default="https://plugin.capgo.app/channel_self"/>
+    <preference name="STATS_URL" default="https://plugin.capgo.app/stats"/>
+    <preference name="AUTO_UPDATE" default="atBackground"/>
+    <preference name="PUBLIC_KEY" default=" "/>
+    <preference name="APP_READY_TIMEOUT" default="10000"/>
+    <preference name="RESPONSE_TIMEOUT" default="20"/>
+    <preference name="AUTO_DELETE_FAILED" default="true"/>
+    <preference name="AUTO_DELETE_PREVIOUS" default="true"/>
+    <preference name="RESET_WHEN_UPDATE" default="true"/>
+    <preference name="PERIOD_CHECK_DELAY" default="0"/>
+    <preference name="ALLOW_MODIFY_URL" default="false"/>
+    <preference name="ALLOW_MODIFY_APP_ID" default="false"/>
+    <preference name="ALLOW_MANUAL_BUNDLE_ERROR" default="false"/>
+    <preference name="ALLOW_PREVIEW" default="false"/>
+    <preference name="ALLOW_SET_DEFAULT_CHANNEL" default="true"/>
+    <preference name="AUTO_SPLASHSCREEN" default="false"/>
+    <preference name="AUTO_SPLASHSCREEN_LOADER" default="false"/>
+    <preference name="AUTO_SPLASHSCREEN_TIMEOUT" default="10000"/>
+    <preference name="SHAKE_MENU" default="false"/>
+    <preference name="ALLOW_SHAKE_CHANNEL_SELECTOR" default="false"/>
+    <preference name="SHAKE_MENU_GESTURE" default="shake"/>
+    <preference name="KEEP_URL_PATH_AFTER_RELOAD" default="false"/>
+    <preference name="DIRECT_UPDATE" default="false"/>
+    <preference name="VERSION" default=" "/>
+    <preference name="OS_LOGGING" default="true"/>
+    <preference name="DISABLE_JS_LOGGING" default="false"/>
+    <preference name="PERSIST_CUSTOM_ID" default="false"/>
+    <preference name="PERSIST_MODIFY_URL" default="false"/>
+
+    <platform name="android">
+        <config-file target="res/xml/config.xml" parent="/*">
+            <feature name="Updater">
+                <param name="android-package" value="app.capgo.cordova.updater.CordovaUpdaterPlugin"/>
+                <param name="onload" value="true"/>
+            </feature>
+        </config-file>
+
+        <config-file target="AndroidManifest.xml" parent="/*">
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+        </config-file>
+
+        <resource-file src="src/android/capgo-updater.xml" target="res/values/capgo-updater.xml"/>
+        <config-file target="res/values/capgo-updater.xml" parent="/resources">
+            <string name="capgo_updater_app_id">$APP_ID</string>
+            <string name="capgo_updater_default_channel">$DEFAULT_CHANNEL</string>
+            <string name="capgo_updater_update_url">$UPDATE_URL</string>
+            <string name="capgo_updater_channel_url">$CHANNEL_URL</string>
+            <string name="capgo_updater_stats_url">$STATS_URL</string>
+            <string name="capgo_updater_auto_update">$AUTO_UPDATE</string>
+            <string name="capgo_updater_public_key">$PUBLIC_KEY</string>
+            <string name="capgo_updater_app_ready_timeout">$APP_READY_TIMEOUT</string>
+            <string name="capgo_updater_response_timeout">$RESPONSE_TIMEOUT</string>
+            <string name="capgo_updater_auto_delete_failed">$AUTO_DELETE_FAILED</string>
+            <string name="capgo_updater_auto_delete_previous">$AUTO_DELETE_PREVIOUS</string>
+            <string name="capgo_updater_reset_when_update">$RESET_WHEN_UPDATE</string>
+            <string name="capgo_updater_period_check_delay">$PERIOD_CHECK_DELAY</string>
+            <string name="capgo_updater_allow_modify_url">$ALLOW_MODIFY_URL</string>
+            <string name="capgo_updater_allow_modify_app_id">$ALLOW_MODIFY_APP_ID</string>
+            <string name="capgo_updater_allow_manual_bundle_error">$ALLOW_MANUAL_BUNDLE_ERROR</string>
+            <string name="capgo_updater_allow_preview">$ALLOW_PREVIEW</string>
+            <string name="capgo_updater_allow_set_default_channel">$ALLOW_SET_DEFAULT_CHANNEL</string>
+            <string name="capgo_updater_auto_splashscreen">$AUTO_SPLASHSCREEN</string>
+            <string name="capgo_updater_auto_splashscreen_loader">$AUTO_SPLASHSCREEN_LOADER</string>
+            <string name="capgo_updater_auto_splashscreen_timeout">$AUTO_SPLASHSCREEN_TIMEOUT</string>
+            <string name="capgo_updater_shake_menu">$SHAKE_MENU</string>
+            <string name="capgo_updater_allow_shake_channel_selector">$ALLOW_SHAKE_CHANNEL_SELECTOR</string>
+            <string name="capgo_updater_shake_menu_gesture">$SHAKE_MENU_GESTURE</string>
+            <string name="capgo_updater_keep_url_path_after_reload">$KEEP_URL_PATH_AFTER_RELOAD</string>
+            <string name="capgo_updater_direct_update">$DIRECT_UPDATE</string>
+            <string name="capgo_updater_version">$VERSION</string>
+            <string name="capgo_updater_os_logging">$OS_LOGGING</string>
+            <string name="capgo_updater_disable_js_logging">$DISABLE_JS_LOGGING</string>
+            <string name="capgo_updater_persist_custom_id">$PERSIST_CUSTOM_ID</string>
+            <string name="capgo_updater_persist_modify_url">$PERSIST_MODIFY_URL</string>
+        </config-file>
+
+        <framework src="src/android/capgo-cordova-updater.gradle" custom="true" type="gradleReference"/>
+
+        <source-file src="src/android/CordovaUpdaterPlugin.java" target-dir="src/"/>
+        <source-file src="src/android/UpdaterPathHandler.java" target-dir="src/"/>
+        <source-file src="src/android/app/capgo/cordova/updater/AndroidAppExitReporter.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/AppLifecycleObserver.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/BundleInfo.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/BundleStatus.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/Callback.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/CapgoUpdater.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/CordovaUpdaterConfig.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/CryptoCipher.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/DataManager.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/DelayCondition.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/DelayUntilNext.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/DelayUpdateUtils.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/DeviceIdHelper.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/DownloadService.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/DownloadWorkerManager.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/InternalUtils.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/Logger.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/ShakeDetector.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/ShakeMenu.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/ThreeFingerPinchDetector.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/compat/JSObject.java" target-dir="src/app/capgo/cordova/updater/compat"/>
+        <source-file src="src/android/app/capgo/cordova/updater/compat/PluginCall.java" target-dir="src/app/capgo/cordova/updater/compat"/>
+    </platform>
+
+    <platform name="ios">
+        <config-file target="config.xml" parent="/*">
+            <feature name="Updater">
+                <param name="ios-package" value="CapgoCordovaUpdaterPlugin"/>
+                <param name="onload" value="true"/>
+            </feature>
+        </config-file>
+
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAppId"><string>$APP_ID</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterDefaultChannel"><string>$DEFAULT_CHANNEL</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterUpdateUrl"><string>$UPDATE_URL</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterChannelUrl"><string>$CHANNEL_URL</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterStatsUrl"><string>$STATS_URL</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAutoUpdate"><string>$AUTO_UPDATE</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterPublicKey"><string>$PUBLIC_KEY</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAppReadyTimeout"><string>$APP_READY_TIMEOUT</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterResponseTimeout"><string>$RESPONSE_TIMEOUT</string></config-file>
+
+        <source-file src="src/ios/AES.swift"/>
+        <source-file src="src/ios/AppHealthTracker.swift"/>
+        <source-file src="src/ios/BigInt.swift"/>
+        <source-file src="src/ios/BundleInfo.swift"/>
+        <source-file src="src/ios/BundleStatus.swift"/>
+        <source-file src="src/ios/CapgoUpdater.swift"/>
+        <source-file src="src/ios/CordovaUpdaterPlugin.swift"/>
+        <source-file src="src/ios/CryptoCipher.swift"/>
+        <source-file src="src/ios/DelayCondition.swift"/>
+        <source-file src="src/ios/DelayUntilNext.swift"/>
+        <source-file src="src/ios/DelayUpdateUtils.swift"/>
+        <source-file src="src/ios/DeviceIdHelper.swift"/>
+        <source-file src="src/ios/InternalUtils.swift"/>
+        <source-file src="src/ios/Logger.swift"/>
+        <source-file src="src/ios/RSA.swift"/>
+        <source-file src="src/ios/ShakeMenu.swift"/>
+        <source-file src="src/ios/UpdaterSchemeHandler.swift"/>
+        <source-file src="src/ios/UserDefaultsExtension.swift"/>
+        <source-file src="src/ios/WebViewStatsReporter.swift"/>
+    </platform>
+</plugin>

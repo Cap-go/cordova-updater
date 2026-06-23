@@ -1,0 +1,79 @@
+name: Bump version
+
+on:
+  push:
+    branches:
+      - main
+      - development
+    paths-ignore:
+      - 'example-app/**'
+      - '.github/**'
+  workflow_dispatch:
+
+jobs:
+  # Run all tests first before creating any tags
+  test:
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    # Called workflow jobs are capped at 10 minutes; never raise that unless explicitly asked.
+    uses: ./.github/workflows/test.yml
+
+  # Only bump version and create tag if all tests pass
+  bump-version:
+    needs: [test]
+    # Keep this job capped at 10 minutes; never raise it unless explicitly asked.
+    timeout-minutes: 10
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    runs-on: ubuntu-latest
+    name: "Bump version and create tag"
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          token: '${{ secrets.PERSONAL_ACCESS_TOKEN }}'
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        id: install_code
+        run: bun i
+      - name: Git config
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Update Doc
+        run: bun run docgen
+      - name: Add doc to github
+        run: |
+          git add README.md
+          git add api.md
+          git commit --m "docs: update doc" || true
+      - name: Create version bump main
+        if: github.ref == 'refs/heads/main'
+        run: bunx capacitor-plugin-standard-version@latest --skip.changelog
+      - name: Create version bump development
+        if: github.ref == 'refs/heads/development'
+        run: bunx capacitor-plugin-standard-version@latest --prerelease alpha --skip.changelog
+      - name: Push to origin
+        run: |
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          remote_repo="https://${GITHUB_ACTOR}:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git"
+          git add -A
+          git diff --staged --quiet || git commit -m "chore: commit any remaining changes" || true
+          git pull --rebase $remote_repo $CURRENT_BRANCH
+          git push $remote_repo HEAD:$CURRENT_BRANCH --follow-tags --tags
+      - name: Push generated doc to doc repo
+        if: github.ref == 'refs/heads/main'
+        uses: nkoppel/push-files-to-another-repository@v1.1.4
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        with:
+          source-files: api.md
+          destination-username: Cap-go
+          destination-repository: website
+          destination-directory: src/content/docs/docs/plugin
+          destination-branch: main
+          commit-email: martindonadieu@gmail.com

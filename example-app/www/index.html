@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cordova Updater Example</title>
+    <script src="cordova.js"></script>
+    <script src="../../dist/plugin.js"></script>
+  </head>
+  <body>
+    <h1 id="title" data-testid="app-title">Cordova Updater Example</h1>
+    <button id="notify" data-testid="notify-app-ready">notifyAppReady</button>
+    <button id="list" data-testid="list-bundles">list</button>
+    <button id="current" data-testid="current-bundle">current</button>
+    <pre id="output" data-testid="output"></pre>
+    <script>
+      const output = document.getElementById('output');
+      const log = (value) => { output.textContent = JSON.stringify(value, null, 2); };
+      const run = async (fn) => {
+        try { log(await fn()); } catch (error) { log({ error: String(error) }); }
+      };
+      document.addEventListener('deviceready', () => {
+        document.getElementById('notify').onclick = () => run(() => cordova.plugins.Updater.notifyAppReady());
+        document.getElementById('list').onclick = () => run(() => cordova.plugins.Updater.list());
+        document.getElementById('current').onclick = () => run(() => cordova.plugins.Updater.current());
+        document.getElementById('title').dataset.ready = 'true';
+      });
+    </script>
+  </body>
+</html>

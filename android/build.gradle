@@ -1,0 +1,83 @@
+ext {
+    junitVersion = '4.13.2'
+    androidxAppCompatVersion = '1.7.1'
+}
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.13.0'
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace = 'app.capgo.cordova.updater'
+    compileSdk 36
+
+    defaultConfig {
+        minSdkVersion 24
+        targetSdkVersion 36
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs = [
+                'stubs',
+                '../src/android/app/capgo/cordova/updater',
+            ]
+            java {
+                srcDir '../src/android'
+                exclude 'test/**'
+                exclude 'app/**'
+            }
+        }
+        test {
+            java.srcDirs = ['../src/android/test/app/capgo/cordova/updater']
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    lint {
+        abortOnError false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'androidx.work:work-runtime:2.10.5'
+    implementation 'androidx.lifecycle:lifecycle-process:2.10.0'
+    implementation 'com.google.android.gms:play-services-tasks:18.4.1'
+    implementation 'com.google.guava:guava:33.6.0-android'
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'io.github.g00fy2:versioncompare:1.5.0'
+    implementation 'com.google.android.play:app-update:2.1.0'
+    implementation 'com.google.android.play:app-update-ktx:2.1.0'
+    implementation 'org.brotli:dec:0.1.2'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'androidx.webkit:webkit:1.11.0'
+
+    testImplementation "junit:junit:$junitVersion"
+    testImplementation 'org.mockito:mockito-core:5.23.0'
+    testImplementation 'org.json:json:20250517'
+    testImplementation 'org.robolectric:robolectric:4.16.1'
+}
