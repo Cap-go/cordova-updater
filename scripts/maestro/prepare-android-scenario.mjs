@@ -76,11 +76,6 @@ const env = {
   CAPGO_DIRECT_UPDATE: scenario.directUpdate,
 };
 
-await runCommand('bun', ['scripts/maestro/sync-cordova-config.mjs'], {
-  cwd: repoRoot,
-  env,
-});
-
 await runCommand('npm', ['ci'], {
   cwd: exampleAppDir,
   env,
@@ -88,6 +83,11 @@ await runCommand('npm', ['ci'], {
 
 await runCommand('npm', ['run', 'build'], {
   cwd: exampleAppDir,
+  env,
+});
+
+await runCommand('bun', ['scripts/maestro/sync-cordova-config.mjs'], {
+  cwd: repoRoot,
   env,
 });
 
