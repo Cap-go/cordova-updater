@@ -57,6 +57,22 @@ function buildPluginVariableArgs(env) {
 }
 
 
+
+async function stripUpdaterPluginFromCordovaMetadata() {
+  const configPath = path.join(exampleAppDir, 'config.xml');
+  let xml = fs.readFileSync(configPath, 'utf8');
+  xml = xml.replace(/\s*<plugin name="@capgo\/cordova-updater"[\s\S]*?<\/plugin>\s*/m, '\n');
+  fs.writeFileSync(configPath, xml, 'utf8');
+
+  const packageJsonPath = path.join(exampleAppDir, 'package.json');
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  packageJson.cordova = packageJson.cordova ?? {};
+  packageJson.cordova.plugins = packageJson.cordova.plugins ?? {};
+  delete packageJson.cordova.plugins['@capgo/cordova-updater'];
+  fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, 'utf8');
+}
+
+
 const scenarioId = process.argv[2];
 
 if (!scenarioId) {
@@ -98,6 +114,9 @@ const androidPlatformDir = path.join(exampleAppDir, 'platforms', 'android');
 if (fs.existsSync(androidPlatformDir)) {
   fs.rmSync(androidPlatformDir, { recursive: true, force: true });
 }
+
+// Installing the plugin during `platform add` uses npm `file:..` and can hit ENAMETOOLONG on CI.
+await stripUpdaterPluginFromCordovaMetadata();
 
 await runCommand('npx', ['cordova', 'platform', 'add', 'android', '--nosave'], {
   cwd: exampleAppDir,
