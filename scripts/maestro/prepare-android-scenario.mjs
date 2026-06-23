@@ -48,8 +48,12 @@ function buildPluginVariableArgs(env) {
   ];
 
   return keys.flatMap((key) => {
-    const value = env[key] ?? env[`CAPGO_${key}`];
-    if (value == null || value === '') {
+    const rawValue = env[key] ?? env[`CAPGO_${key}`];
+    if (rawValue == null || rawValue === '') {
+      return [];
+    }
+    const value = String(rawValue).trim();
+    if (!value) {
       return [];
     }
     return [`--variable=${key}=${value}`];
@@ -123,10 +127,19 @@ await runCommand('npx', ['cordova', 'platform', 'add', 'android', '--nosave'], {
   env,
 });
 
+const pluginPath = path.resolve(repoRoot);
+const pluginJsPath = path.join(pluginPath, 'dist', 'plugin.js');
+if (!fs.existsSync(pluginJsPath)) {
+  await runCommand('bun', ['run', 'build'], {
+    cwd: repoRoot,
+    env,
+  });
+}
+
 const pluginVariableArgs = buildPluginVariableArgs(env);
 await runCommand(
   'npx',
-  ['cordova', 'plugin', 'add', '../', '--link', '--nosave', ...pluginVariableArgs],
+  ['cordova', 'plugin', 'add', pluginPath, '--link', '--nosave', ...pluginVariableArgs],
   {
     cwd: exampleAppDir,
     env,
