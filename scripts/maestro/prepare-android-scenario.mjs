@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { runCommand } from './command.mjs';
 import { createBuildEnv, exampleAppDir, repoRoot, getScenario } from './scenarios.mjs';
@@ -89,10 +90,12 @@ await runCommand('bun', ['scripts/maestro/sync-cordova-config.mjs'], {
 
 
 
-await runCommand('npx', ['cordova', 'platform', 'rm', 'android', '--nosave'], {
-  cwd: exampleAppDir,
-  env,
-});
+// Avoid `cordova platform rm` — it runs `npm uninstall cordova-android`, which breaks when
+// example-app deps were installed with bun (no package-lock.json).
+const androidPlatformDir = path.join(exampleAppDir, 'platforms', 'android');
+if (fs.existsSync(androidPlatformDir)) {
+  fs.rmSync(androidPlatformDir, { recursive: true, force: true });
+}
 
 await runCommand('npx', ['cordova', 'platform', 'add', 'android'], {
   cwd: exampleAppDir,

@@ -51,7 +51,7 @@ jobs:
   build_ios:
     permissions:
       contents: read
-    timeout-minutes: 10
+    timeout-minutes: 20
     runs-on: macOS-latest
     steps:
       - name: Check out
