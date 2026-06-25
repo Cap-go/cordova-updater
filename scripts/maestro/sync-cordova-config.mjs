@@ -90,7 +90,7 @@ function injectIosLocalNetworking(xml) {
 
   const block = `    <platform name="ios">
         <preference name="SwiftVersion" value="5.0" />
-        <preference name="deployment-target" value="13.0" />
+        <preference name="deployment-target" value="15.0" />
         <edit-config file="*-Info.plist" mode="merge" target="NSAppTransportSecurity">
             <dict>
                 <key>NSAllowsLocalNetworking</key>
