@@ -818,7 +818,11 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     }
 
     var updaterWebView: WKWebView? {
-        return self.webView ?? self.webViewEngine
+#if SWIFT_PACKAGE
+        return (self.webView as? WKWebView) ?? (self.webViewEngine as? WKWebView)
+#else
+        return (self.webView as? WKWebView) ?? (self.webViewEngine?.engineWebView as? WKWebView)
+#endif
     }
 
     private func bundlePayload(_ bundleInfo: BundleInfo) -> JSObject {
