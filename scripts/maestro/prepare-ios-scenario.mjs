@@ -23,8 +23,12 @@ const env = createScenarioEnv(scenario);
 await prepareExampleWebAssets(exampleAppDir, repoRoot, env);
 
 const iosPlatformDir = path.join(exampleAppDir, 'platforms', 'ios');
+const pluginsRoot = path.join(exampleAppDir, 'plugins');
 if (fs.existsSync(iosPlatformDir)) {
   fs.rmSync(iosPlatformDir, { recursive: true, force: true });
+}
+if (fs.existsSync(pluginsRoot)) {
+  fs.rmSync(pluginsRoot, { recursive: true, force: true });
 }
 
 await stripUpdaterPluginFromCordovaMetadata(exampleAppDir);
