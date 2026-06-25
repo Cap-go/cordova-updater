@@ -42,10 +42,13 @@ export function findExampleIosAppPath(baseDir = exampleAppDir) {
 
   for (const searchRoot of searchRoots) {
     try {
-      for (const entry of readdirSync(searchRoot)) {
-        if (entry.endsWith('.app')) {
-          return path.join(searchRoot, entry);
-        }
+      const entries = readdirSync(searchRoot).sort((a, b) => a.localeCompare(b));
+      if (entries.includes(exampleIosAppName)) {
+        return path.join(searchRoot, exampleIosAppName);
+      }
+      const firstApp = entries.find((entry) => entry.endsWith('.app'));
+      if (firstApp) {
+        return path.join(searchRoot, firstApp);
       }
     } catch {
       // ignore missing build output directories
@@ -268,6 +271,9 @@ export function createBuildEnv({
     VITE_CAPGO_PERSIST_MODIFY_URL: mergedEnv.CAPGO_PERSIST_MODIFY_URL ?? 'false',
     APP_ID: mergedEnv.CAPGO_APP_ID ?? 'app.capgo.updater',
     DEFAULT_CHANNEL: mergedEnv.CAPGO_DEFAULT_CHANNEL ?? '',
+    CAPGO_UPDATE_URL: updateUrl,
+    CAPGO_CHANNEL_URL: `${deviceBaseUrl}/api/channel?scenario=${scenarioId}`,
+    CAPGO_STATS_URL: `${deviceBaseUrl}/api/stats?scenario=${scenarioId}`,
     UPDATE_URL: updateUrl,
     CHANNEL_URL: `${deviceBaseUrl}/api/channel?scenario=${scenarioId}`,
     STATS_URL: `${deviceBaseUrl}/api/stats?scenario=${scenarioId}`,

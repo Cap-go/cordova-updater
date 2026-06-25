@@ -15,6 +15,6 @@ else
     xcodebuild test -scheme CapgoCordovaUpdater -destination "id=${SIMULATOR_ID}" "$@"
   else
     echo "No iPhone simulator available; compiling iOS tests with swift build." >&2
-    swift build --sdk "$SDK" --triple "$TRIPLE" --target CordovaUpdaterPluginTests "$@"
+    swift build --sdk "$SDK" --triple "$TRIPLE" --target CordovaUpdaterPluginTests
   fi
 fi

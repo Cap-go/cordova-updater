@@ -105,13 +105,13 @@ try {
     env: process.env,
   });
 } catch (error) {
-  const updaterPackage = path.join(exampleNodeModules, '@capgo', 'cordova-updater');
-  try {
-    await readFile(path.join(updaterPackage, 'dist', 'esm', 'index.js'));
-    console.warn(`[maestro] bun install failed but example app deps look present: ${error.message}`);
-  } catch {
-    throw error;
-  }
+  console.warn(
+    `[maestro] bun install failed, retrying with npm ci: ${error instanceof Error ? error.message : String(error)}`,
+  );
+  await runCommand('npm', ['ci'], {
+    cwd: exampleAppDir,
+    env: process.env,
+  });
 }
 
 for (const scenario of selectedScenarios) {

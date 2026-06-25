@@ -23,6 +23,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
 
     private var cordovaListeners: [String: ListenerRegistration] = [:]
     private var savedCalls: [String: CordovaPluginCall] = [:]
+    private let listenerStateQueue = DispatchQueue(label: "ee.forgr.capgo.cordovaUpdater.listenerState")
     private var savedAppUpdateCall: CordovaPluginCall?
 
     public override func pluginInitialize() {
@@ -744,7 +745,9 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     }
 
     private func saveCallForAsyncHandling(_ call: CAPPluginCall) {
-        savedCalls[call.callbackId] = call
+        listenerStateQueue.sync {
+            savedCalls[call.callbackId] = call
+        }
     }
 
     private func notifyListenersOnMain(_ eventName: String, data: JSObject) {
@@ -762,10 +765,12 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     }
 
     func notifyJSListeners(_ eventName: String, data: JSObject) {
-        for registration in cordovaListeners.values where registration.eventName == eventName {
-            guard let call = savedCalls[registration.callbackId] else {
-                continue
-            }
+        let targetCalls: [CordovaPluginCall] = listenerStateQueue.sync {
+            cordovaListeners.values
+                .filter { $0.eventName == eventName }
+                .compactMap { savedCalls[$0.callbackId] }
+        }
+        for call in targetCalls {
             call.sendKeepAliveResult(data)
         }
     }
@@ -779,8 +784,10 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             call.reject("listenerId must be provided.")
             return
         }
-        savedCalls[call.callbackId] = call
-        cordovaListeners[listenerId] = ListenerRegistration(eventName: eventName, callbackId: call.callbackId)
+        listenerStateQueue.sync {
+            savedCalls[call.callbackId] = call
+            cordovaListeners[listenerId] = ListenerRegistration(eventName: eventName, callbackId: call.callbackId)
+        }
         call.sendNoResultKeepAlive()
     }
 
@@ -789,14 +796,22 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             call.reject("listenerId must be provided.")
             return
         }
-        if let registration = cordovaListeners.removeValue(forKey: listenerId) {
-            savedCalls.removeValue(forKey: registration.callbackId)
+        listenerStateQueue.sync {
+            if let registration = cordovaListeners.removeValue(forKey: listenerId) {
+                savedCalls.removeValue(forKey: registration.callbackId)
+            }
         }
         call.resolve()
     }
 
     func removeAllListeners(_ call: CAPPluginCall) {
-        cordovaListeners.removeAll()
+        listenerStateQueue.sync {
+            let callbackIds = Set(cordovaListeners.values.map { $0.callbackId })
+            for callbackId in callbackIds {
+                savedCalls.removeValue(forKey: callbackId)
+            }
+            cordovaListeners.removeAll()
+        }
         call.resolve()
     }
 

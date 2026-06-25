@@ -48,7 +48,7 @@ function buildPluginVariableArgs(env) {
   ];
 
   return keys.flatMap((key) => {
-    const rawValue = env[key] ?? env[`CAPGO_${key}`];
+    const rawValue = env[`CAPGO_${key}`] ?? env[key];
     if (rawValue == null || rawValue === '') {
       return [];
     }

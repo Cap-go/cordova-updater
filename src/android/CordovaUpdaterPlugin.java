@@ -174,6 +174,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
 
     private SharedPreferences.Editor editor;
     private SharedPreferences prefs;
+    private SharedPreferences delayUpdatePrefs;
     private final Object previewSessionsLock = new Object();
     protected CapgoUpdater implementation;
     private Boolean persistCustomId = false;
@@ -684,9 +685,9 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         Logger.Options loggerOptions = new Logger.Options(osLogging);
         this.logger = new Logger("CapgoUpdater", loggerOptions);
 
-        final SharedPreferences webViewPrefs =
+        this.delayUpdatePrefs =
             this.getContext().getSharedPreferences("CapgoCordovaUpdaterWebView", Activity.MODE_PRIVATE);
-        final SharedPreferences.Editor webViewEditor = webViewPrefs.edit();
+        final SharedPreferences.Editor webViewEditor = this.delayUpdatePrefs.edit();
 
         try {
             this.implementation = new CapgoUpdater(logger) {
@@ -726,7 +727,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             // Removed unused OkHttpClient creation - using shared client in DownloadService instead
             this.currentVersionNative = new Version(this.updaterConfig.getString("version", pInfo.versionName));
             this.currentBuildVersion = this.getVersionCode(pInfo);
-            this.delayUpdateUtils = new DelayUpdateUtils(webViewPrefs, webViewEditor, this.currentVersionNative, logger);
+            this.delayUpdateUtils = new DelayUpdateUtils(this.delayUpdatePrefs, webViewEditor, this.currentVersionNative, logger);
         } catch (final PackageManager.NameNotFoundException e) {
             logger.error("Error instantiating implementation " + e.getMessage());
             return;
@@ -1706,7 +1707,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             "var sessionId=String(Date.now())+'-'+Math.random().toString(36).slice(2);" +
             "function s(value){try{if(value===undefined){return '';}if(value===null){return 'null';}if(typeof value==='string'){return value;}if(value&&typeof value.message==='string'){return value.message;}return String(value);}catch(_){return '';}}" +
             "function stack(value){try{return value&&value.stack?String(value.stack):'';}catch(_){return '';}}" +
-            "function updater(){var cap=window.Capacitor;if(!cap||!cap.Plugins){return null;}return cap.Plugins.CapacitorUpdater||null;}" +
+            "function updater(){var cap=window.Capacitor;if(cap&&cap.Plugins&&cap.Plugins.CapacitorUpdater){return cap.Plugins.CapacitorUpdater;}if(window.cordova&&window.cordova.plugins&&window.cordova.plugins.Updater){return window.cordova.plugins.Updater;}return null;}" +
             "function flush(){var plugin=updater();if(!plugin||typeof plugin.reportWebViewError!=='function'){return false;}while(queue.length){var payload=queue.shift();try{var result=plugin.reportWebViewError(payload);if(result&&typeof result.catch==='function'){result.catch(function(){});}}catch(_){}}return true;}" +
             "var retries=0;function scheduleFlush(){if(flush()){return;}if(retries++<40){setTimeout(scheduleFlush,250);}}" +
             "function send(payload){try{if(sentReports>=maxReports){return;}payload.href=payload.href||location.href||'';payload.user_agent=navigator.userAgent||'';payload.session_id=sessionId;var key=[payload.type,payload.message,payload.source,payload.line,payload.column,payload.tag_name].join('|');if(seen[key]){return;}seen[key]=true;sentReports+=1;queue.push(payload);scheduleFlush();}catch(_){}}" +
@@ -2501,7 +2502,8 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     }
 
     private void syncKeepUrlPathFlag(final boolean enabled) {
-        if (cordova == null || getUpdaterWebView() == null) {
+        final android.webkit.WebView webView = getUpdaterWebView();
+        if (cordova == null || webView == null) {
             return;
         }
         final String script = enabled
@@ -2511,7 +2513,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             : "(function(){try{localStorage.removeItem('" +
               KEEP_URL_FLAG_KEY +
               "');}catch(e){}delete window.__capgoKeepUrlPathAfterReload;var evt;try{evt=new CustomEvent('CapacitorUpdaterKeepUrlPathAfterReload',{detail:{enabled:false}});}catch(err){evt=document.createEvent('CustomEvent');evt.initCustomEvent('CapacitorUpdaterKeepUrlPathAfterReload',false,false,{enabled:false});}window.dispatchEvent(evt);})();";
-        getUpdaterWebView().post(() -> getUpdaterWebView().evaluateJavascript(script, null));
+        webView.post(() -> webView.evaluateJavascript(script, null));
     }
 
     private void applyCurrentBundleToBridge() {
@@ -4408,7 +4410,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                                         plannedDirectUpdate
                                     );
                                     if (directUpdateAllowedNow) {
-                                        String delayUpdatePreferences = prefs.getString(DelayUpdateUtils.DELAY_CONDITION_PREFERENCES, "[]");
+                                        String delayUpdatePreferences = delayUpdatePrefs.getString(DelayUpdateUtils.DELAY_CONDITION_PREFERENCES, "[]");
                                         ArrayList<DelayCondition> delayConditionList = delayUpdateUtils.parseDelayConditions(
                                             delayUpdatePreferences
                                         );
@@ -4590,7 +4592,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             if (this.shouldBlockAutoUpdateForPreviewSession()) {
                 return;
             }
-            String delayUpdatePreferences = prefs.getString(DelayUpdateUtils.DELAY_CONDITION_PREFERENCES, "[]");
+            String delayUpdatePreferences = delayUpdatePrefs.getString(DelayUpdateUtils.DELAY_CONDITION_PREFERENCES, "[]");
             ArrayList<DelayCondition> delayConditionList = delayUpdateUtils.parseDelayConditions(delayUpdatePreferences);
             if (!delayConditionList.isEmpty()) {
                 logger.info("Update delayed until delay conditions met");

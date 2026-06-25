@@ -23,6 +23,15 @@ function readAutoUpdate() {
   return process.env.CAPGO_AUTO_UPDATE === 'true' ? 'true' : 'off';
 }
 
+function escapeXmlAttr(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/'/g, '&apos;');
+}
+
 function readAppReadyTimeout() {
   const parsed = Number.parseInt(process.env.CAPGO_APP_READY_TIMEOUT ?? '20000', 10);
   return Number.isFinite(parsed) && parsed >= 1000 ? String(parsed) : '20000';
@@ -74,9 +83,30 @@ const pluginVariableNames = [
   'AUTO_SPLASHSCREEN',
 ];
 
+function injectAndroidCleartextTraffic(xml) {
+  if (xml.includes('usesCleartextTraffic')) {
+    return xml;
+  }
+
+  if (!xml.includes('xmlns:android=')) {
+    xml = xml.replace(
+      '<widget id="app.capgo.updater" version="1.0.0" xmlns="http://www.w3.org/ns/widgets">',
+      '<widget id="app.capgo.updater" version="1.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:android="http://schemas.android.com/apk/res/android">',
+    );
+  }
+
+  const block = `    <platform name="android">
+        <edit-config file="app/src/main/AndroidManifest.xml" mode="merge" target="/manifest/application">
+            <application android:usesCleartextTraffic="true" />
+        </edit-config>
+    </platform>`;
+
+  return xml.replace('</widget>', `${block}\n</widget>`);
+}
+
 function syncPluginVariables(xml) {
   const variables = pluginVariableNames
-    .map((name) => `        <variable name="${name}" value="${preferences[name]}" />`)
+    .map((name) => `        <variable name="${name}" value="${escapeXmlAttr(preferences[name])}" />`)
     .join('\n');
 
   const pluginBlock = `<plugin name="@capgo/cordova-updater" spec="..">\n${variables}\n    </plugin>`;
@@ -93,10 +123,11 @@ async function syncConfigXml() {
   let xml = await readFile(configPath, 'utf8');
 
   for (const [name, value] of Object.entries(preferences)) {
+    const safeValue = escapeXmlAttr(value);
     const preferencePattern = new RegExp(`(<preference\\s+name="${name}"\\s+value=")([^"]*)("\\s*/>)`, 'm');
 
     if (preferencePattern.test(xml)) {
-      xml = xml.replace(preferencePattern, `$1${value}$3`);
+      xml = xml.replace(preferencePattern, (_, prefix, __, suffix) => `${prefix}${safeValue}${suffix}`);
       continue;
     }
 
@@ -105,10 +136,11 @@ async function syncConfigXml() {
       throw new Error('config.xml is missing </widget>');
     }
 
-    xml = xml.slice(0, insertPoint) + `    <preference name="${name}" value="${value}" />\n` + xml.slice(insertPoint);
+    xml = xml.slice(0, insertPoint) + `    <preference name="${name}" value="${safeValue}" />\n` + xml.slice(insertPoint);
   }
 
   xml = syncPluginVariables(xml);
+  xml = injectAndroidCleartextTraffic(xml);
   await writeFile(configPath, xml, 'utf8');
 }
 
