@@ -186,6 +186,8 @@ jobs:
           CAPGO_MAESTRO_DEVICE_BASE_URL: http://127.0.0.1:3192
         run: |
           set -euo pipefail
+          simulator_id="$(./scripts/maestro/select-ios-simulator.sh)"
+          xcrun simctl boot "$simulator_id" >/dev/null 2>&1 || true
           artifact_root="$RUNNER_TEMP/maestro-ios-apps"
           scenarios=(
             manual-zip
