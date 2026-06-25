@@ -58,4 +58,8 @@
         <variable name="SHAKE_MENU" value="false" />
         <variable name="AUTO_SPLASHSCREEN" value="false" />
     </plugin>
+    <platform name="ios">
+        <preference name="SwiftVersion" value="5.0" />
+        <preference name="deployment-target" value="13.0" />
+    </platform>
 </widget>
