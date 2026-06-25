@@ -38,6 +38,7 @@ export function findExampleIosAppPath(baseDir = exampleAppDir) {
     path.join(baseDir, 'platforms', 'ios', 'build', 'emulator'),
     path.join(baseDir, 'platforms', 'ios', 'build', 'device'),
     path.join(baseDir, 'platforms', 'ios', 'build'),
+    path.join(baseDir, 'platforms', 'ios', 'build', 'Debug-iphonesimulator'),
   ];
 
   for (const searchRoot of searchRoots) {

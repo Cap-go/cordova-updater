@@ -2,7 +2,6 @@
   "name": "cordova-updater-example",
   "private": true,
   "version": "1.0.0",
-  "type": "module",
   "description": "Example Cordova app for @capgo/cordova-updater",
   "scripts": {
     "start": "node ./node_modules/vite/bin/vite.js",
@@ -25,26 +24,6 @@
       "ios",
       "android"
     ],
-    "plugins": {
-      "@capgo/cordova-updater": {
-        "APP_ID": "app.capgo.updater",
-        "DEFAULT_CHANNEL": "",
-        "UPDATE_URL": "http://10.0.2.2:3192/api/updates/manual-zip",
-        "CHANNEL_URL": "http://10.0.2.2:3192/api/channel?scenario=manual-zip",
-        "STATS_URL": "http://10.0.2.2:3192/api/stats?scenario=manual-zip",
-        "AUTO_UPDATE": "false",
-        "DIRECT_UPDATE": "false",
-        "PUBLIC_KEY": " ",
-        "APP_READY_TIMEOUT": "60000",
-        "ALLOW_MODIFY_URL": "true",
-        "ALLOW_MODIFY_APP_ID": "true",
-        "ALLOW_MANUAL_BUNDLE_ERROR": "true",
-        "ALLOW_SET_DEFAULT_CHANNEL": "true",
-        "PERSIST_CUSTOM_ID": "true",
-        "PERSIST_MODIFY_URL": "true",
-        "SHAKE_MENU": "false",
-        "AUTO_SPLASHSCREEN": "false"
-      }
-    }
+    "plugins": {}
   }
 }

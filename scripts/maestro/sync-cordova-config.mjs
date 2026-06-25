@@ -83,6 +83,23 @@ const pluginVariableNames = [
   'AUTO_SPLASHSCREEN',
 ];
 
+function injectIosLocalNetworking(xml) {
+  if (xml.includes('NSAllowsLocalNetworking')) {
+    return xml;
+  }
+
+  const block = `    <platform name="ios">
+        <edit-config file="*-Info.plist" mode="merge" target="NSAppTransportSecurity">
+            <dict>
+                <key>NSAllowsLocalNetworking</key>
+                <true />
+            </dict>
+        </edit-config>
+    </platform>`;
+
+  return xml.replace('</widget>', `${block}\n</widget>`);
+}
+
 function injectAndroidCleartextTraffic(xml) {
   if (xml.includes('usesCleartextTraffic')) {
     return xml;
@@ -141,6 +158,7 @@ async function syncConfigXml() {
 
   xml = syncPluginVariables(xml);
   xml = injectAndroidCleartextTraffic(xml);
+  xml = injectIosLocalNetworking(xml);
   await writeFile(configPath, xml, 'utf8');
 }
 
