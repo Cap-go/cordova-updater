@@ -1,4 +1,6 @@
+#if SWIFT_PACKAGE
 import Cordova
+#endif
 
 @objc(CapgoCordovaUpdaterPlugin)
 extension CordovaUpdaterPlugin {

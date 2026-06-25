@@ -1,5 +1,7 @@
 import Foundation
+#if SWIFT_PACKAGE
 import Cordova
+#endif
 
 class CordovaPluginCall {
     private let command: CDVInvokedUrlCommand

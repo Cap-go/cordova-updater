@@ -169,5 +169,14 @@
         <source-file src="src/ios/UpdaterSchemeHandler.swift"/>
         <source-file src="src/ios/UserDefaultsExtension.swift"/>
         <source-file src="src/ios/WebViewStatsReporter.swift"/>
+
+        <podspec>
+            <pods use-frameworks="true">
+                <pod name="Alamofire" spec="~> 5.11.0" />
+                <pod name="ZIPFoundation" spec="~> 0.9.20" />
+                <pod name="Version" spec="0.8.0" />
+                <pod name="BigInt" spec="~> 5.2.0" />
+            </pods>
+        </podspec>
     </platform>
 </plugin>

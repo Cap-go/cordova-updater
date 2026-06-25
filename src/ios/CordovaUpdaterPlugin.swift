@@ -5,7 +5,9 @@
  */
 
 import Foundation
+#if SWIFT_PACKAGE
 import Cordova
+#endif
 import UIKit
 import WebKit
 import Version

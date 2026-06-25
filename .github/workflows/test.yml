@@ -199,10 +199,15 @@ jobs:
           for scenario in "${scenarios[@]}"; do
             app_artifact_path="$artifact_root/$scenario"
             bun scripts/maestro/prepare-ios-scenario.mjs "$scenario"
+            (cd example-app/platforms/ios && pod install --repo-update)
             derived_data_path="$RUNNER_TEMP/maestro-ios-derived-$scenario"
             rm -rf "$derived_data_path"
-            xcodebuild               -workspace "example-app/platforms/ios/Updater Example.xcworkspace"               -scheme "Updater Example"               -configuration Debug               -destination "generic/platform=iOS Simulator"               -derivedDataPath "$derived_data_path"               build
+            xcodebuild               -workspace "example-app/platforms/ios/Updater Example.xcworkspace"               -scheme "Updater Example"               -configuration Debug               -destination "generic/platform=iOS Simulator"               -derivedDataPath "$derived_data_path"               SWIFT_VERSION=5.0               IPHONEOS_DEPLOYMENT_TARGET=13.0               build
             app_path="$derived_data_path/Build/Products/Debug-iphonesimulator/Updater Example.app"
+            if [[ ! -d "$app_path" ]]; then
+              echo "Expected iOS app at $app_path" >&2
+              exit 1
+            fi
             mkdir -p "$app_artifact_path"
             ditto "$app_path" "$app_artifact_path/App.app"
           done
