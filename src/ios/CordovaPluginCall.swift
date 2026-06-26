@@ -137,6 +137,16 @@ class CordovaPluginCall {
         sendResult(status: CDVCommandStatus_ERROR, message: composed)
     }
 
+    private func sendOnMainThread(_ send: @escaping () -> Void) {
+        if Thread.isMainThread {
+            send()
+        } else {
+            DispatchQueue.main.async {
+                send()
+            }
+        }
+    }
+
     private func sendResult(status: CDVCommandStatus, message: Any?) {
         guard !finished else {
             return
@@ -158,7 +168,10 @@ class CordovaPluginCall {
             result = CDVPluginResult(status: status, messageAs: String(describing: message))!
         }
 
-        plugin.commandDelegate.send(result, callbackId: callbackId)
+        let callbackId = self.callbackId
+        sendOnMainThread {
+            plugin.commandDelegate.send(result, callbackId: callbackId)
+        }
     }
 
     func sendKeepAliveResult(_ data: JSObject) {
@@ -167,7 +180,10 @@ class CordovaPluginCall {
         }
         let result = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: data as [AnyHashable: Any])!
         result.setKeepCallbackAs(true)
-        plugin.commandDelegate.send(result, callbackId: callbackId)
+        let callbackId = self.callbackId
+        sendOnMainThread {
+            plugin.commandDelegate.send(result, callbackId: callbackId)
+        }
     }
 
     func sendNoResultKeepAlive() {
@@ -176,6 +192,9 @@ class CordovaPluginCall {
         }
         let result = CDVPluginResult(status: CDVCommandStatus_NO_RESULT)!
         result.setKeepCallbackAs(true)
-        plugin.commandDelegate.send(result, callbackId: callbackId)
+        let callbackId = self.callbackId
+        sendOnMainThread {
+            plugin.commandDelegate.send(result, callbackId: callbackId)
+        }
     }
 }
