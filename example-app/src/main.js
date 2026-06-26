@@ -3189,7 +3189,15 @@ bindActionButton(elements.quickRunSmokeSequenceButton, () => {
   });
 });
 
-document.addEventListener('deviceready', () => {
+function startHarnessFromCordova() {
   platform = window.cordova?.platformId ?? 'web';
   void bootstrap();
-}, false);
+}
+
+document.addEventListener('deviceready', startHarnessFromCordova, false);
+document.addEventListener('capgo-cordova-ready', startHarnessFromCordova, false);
+
+// ES modules load after cordova.js; deviceready may already have fired on iOS.
+if (window.cordova?.platformId) {
+  startHarnessFromCordova();
+}

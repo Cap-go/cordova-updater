@@ -166,15 +166,27 @@ async function syncConfigXml() {
 
 async function injectCordovaBootstrap(indexPath) {
   let html = await readFile(indexPath, 'utf8');
-  if (html.includes('src="cordova.js"')) {
+  if (html.includes('capgo-cordova-ready-bridge')) {
     return;
   }
 
-  const cordovaTag = '<script src="cordova.js"></script>\n    ';
+  const cordovaTags = `<script src="cordova.js"></script>
+    <script id="capgo-cordova-ready-bridge">
+      (function () {
+        function notifyReady() {
+          window.dispatchEvent(new CustomEvent('capgo-cordova-ready'));
+        }
+        document.addEventListener('deviceready', notifyReady, false);
+        if (window.cordova && window.cordova.platformId) {
+          notifyReady();
+        }
+      })();
+    </script>
+    `;
   if (html.includes('<script type="module"')) {
-    html = html.replace('<script type="module"', `${cordovaTag}<script type="module"`);
+    html = html.replace('<script type="module"', `${cordovaTags}<script type="module"`);
   } else if (html.includes('</body>')) {
-    html = html.replace('</body>', `    ${cordovaTag}</body>`);
+    html = html.replace('</body>', `    ${cordovaTags}</body>`);
   } else {
     throw new Error(`Unable to inject cordova.js into ${indexPath}`);
   }
