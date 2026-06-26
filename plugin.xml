@@ -146,6 +146,29 @@
         <config-file target="*-Info.plist" parent="CapgoUpdaterPublicKey"><string>$PUBLIC_KEY</string></config-file>
         <config-file target="*-Info.plist" parent="CapgoUpdaterAppReadyTimeout"><string>$APP_READY_TIMEOUT</string></config-file>
         <config-file target="*-Info.plist" parent="CapgoUpdaterResponseTimeout"><string>$RESPONSE_TIMEOUT</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAutoDeleteFailed"><string>$AUTO_DELETE_FAILED</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAutoDeletePrevious"><string>$AUTO_DELETE_PREVIOUS</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterResetWhenUpdate"><string>$RESET_WHEN_UPDATE</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterPeriodCheckDelay"><string>$PERIOD_CHECK_DELAY</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAllowModifyUrl"><string>$ALLOW_MODIFY_URL</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAllowModifyAppId"><string>$ALLOW_MODIFY_APP_ID</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAllowManualBundleError"><string>$ALLOW_MANUAL_BUNDLE_ERROR</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAllowPreview"><string>$ALLOW_PREVIEW</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAllowSetDefaultChannel"><string>$ALLOW_SET_DEFAULT_CHANNEL</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAutoSplashscreen"><string>$AUTO_SPLASHSCREEN</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAutoSplashscreenLoader"><string>$AUTO_SPLASHSCREEN_LOADER</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAutoSplashscreenTimeout"><string>$AUTO_SPLASHSCREEN_TIMEOUT</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterShakeMenu"><string>$SHAKE_MENU</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAllowShakeChannelSelector"><string>$ALLOW_SHAKE_CHANNEL_SELECTOR</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterShakeMenuGesture"><string>$SHAKE_MENU_GESTURE</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterKeepUrlPathAfterReload"><string>$KEEP_URL_PATH_AFTER_RELOAD</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterDirectUpdate"><string>$DIRECT_UPDATE</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterVersion"><string>$VERSION</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterOsLogging"><string>$OS_LOGGING</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterDisableJsLogging"><string>$DISABLE_JS_LOGGING</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterPersistCustomId"><string>$PERSIST_CUSTOM_ID</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterPersistModifyUrl"><string>$PERSIST_MODIFY_URL</string></config-file>
+
 
         <source-file src="src/ios/AES.swift"/>
         <source-file src="src/ios/AppHealthTracker.swift"/>

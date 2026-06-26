@@ -42,8 +42,15 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         schemeHandler?.stop(task: task)
     }
 
+    private func plistConfigKey(_ key: String) -> String {
+        guard let first = key.first else {
+            return "CapgoUpdater" + key
+        }
+        return "CapgoUpdater" + first.uppercased() + key.dropFirst()
+    }
+
     private func readConfigString(_ key: String, _ defaultValue: String? = nil) -> String? {
-        guard let value = Bundle.main.object(forInfoDictionaryKey: "CapgoUpdater" + key.capitalized) as? String, !value.trimmingCharacters(in: .whitespaces).isEmpty else {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: plistConfigKey(key)) as? String, !value.trimmingCharacters(in: .whitespaces).isEmpty else {
             return defaultValue
         }
         return value
