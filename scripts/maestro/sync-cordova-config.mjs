@@ -170,8 +170,8 @@ async function normalizeCordovaWebViewHtml(indexPath) {
   const original = html;
 
   html = html.replace(
-    /<script type="module"(?:\s+crossorigin(?:="anonymous")?)?\s+src="(\.\/assets\/[^"]+)"><\/script>/g,
-    '<script src="$1"></script>',
+    /<script(?:\s+type="module")?(?:\s+crossorigin(?:="anonymous")?)?\s+src="(\.\/assets\/[^"]+)"><\/script>/g,
+    '<script defer src="$1"></script>',
   );
   html = html.replace(
     /<link rel="stylesheet"(?:\s+crossorigin(?:="anonymous")?)?\s+href="(\.\/assets\/[^"]+)">/g,
