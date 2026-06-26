@@ -16,6 +16,7 @@ import Version
  * Please read the Capacitor iOS Plugin Development Guide
  * here: https://capacitorjs.com/docs/plugins/ios
  */
+@objc(CapgoCordovaUpdaterPlugin)
 public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     private var schemeHandler: UpdaterSchemeHandler?
     private struct ListenerRegistration {

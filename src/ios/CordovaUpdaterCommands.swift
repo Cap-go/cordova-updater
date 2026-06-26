@@ -2,7 +2,6 @@
 import Cordova
 #endif
 
-@objc(CapgoCordovaUpdaterPlugin)
 extension CordovaUpdaterPlugin {
     @objc(reportWebViewError:)
     func reportWebViewErrorCommand(_ command: CDVInvokedUrlCommand) {
