@@ -7,7 +7,7 @@ if (window.__capgoProbe) {
 console.log('[Harness] module boot', window.__capgoProbe ?? null);
 
 const plugin = Updater;
-let platform = 'web';
+let platform = window.cordova?.platformId ?? 'web';
 const buildLabel = import.meta.env.VITE_CAPGO_APP_LABEL ?? 'manual-build';
 const scenarioId = import.meta.env.VITE_CAPGO_SCENARIO ?? 'manual';
 const directUpdateMode = import.meta.env.VITE_CAPGO_DIRECT_UPDATE ?? 'false';
@@ -198,8 +198,8 @@ const smokeSequenceExtendedSettleActionIds = new Set([
   'unset-channel',
   'remove-all-listeners',
 ]);
-const manualZipStoreContractSmokeActionIds =
-  platform === 'ios'
+function getManualZipStoreContractSmokeActionIds() {
+  return platform === 'ios'
     ? []
     : [
         'get-app-update-info',
@@ -208,10 +208,14 @@ const manualZipStoreContractSmokeActionIds =
         'complete-flexible-update',
         'get-latest',
       ];
-const manualZipChannelSmokeActionIds =
-  platform === 'ios' ? [] : ['set-channel-beta', 'get-channel', 'unset-channel'];
-const manualZipSmokeActionIds =
-  platform === 'ios'
+}
+
+function getManualZipChannelSmokeActionIds() {
+  return platform === 'ios' ? [] : ['set-channel-beta', 'get-channel', 'unset-channel'];
+}
+
+function getManualZipSmokeActionIds() {
+  return platform === 'ios'
     ? [
         'set-app-id',
         'set-custom-id',
@@ -239,13 +243,15 @@ const manualZipSmokeActionIds =
         'set-stats-url',
         'set-channel-url',
         'get-latest',
-        ...manualZipChannelSmokeActionIds,
+        ...getManualZipChannelSmokeActionIds(),
         'get-next-bundle',
         'get-failed-update',
         'queue-boot-verify-persisted-config',
         'remove-all-listeners',
-        ...manualZipStoreContractSmokeActionIds,
+        ...getManualZipStoreContractSmokeActionIds(),
       ];
+}
+
 const coreSmokeExcludedActionIds = new Set([
   'get-app-update-info',
   'open-app-store',
@@ -257,32 +263,38 @@ const coreSmokeExcludedActionIds = new Set([
   'set-shake-channel-selector',
   'is-shake-channel-selector-enabled',
 ]);
-const smokeSequenceActionIdsByScenario = {
-  'manual-zip': manualZipSmokeActionIds,
-  'manual-zip-no-persist': [
-    'set-custom-id',
-    'set-app-id',
-    'set-update-url',
-    'set-stats-url',
-    'set-channel-url',
-    'set-channel-beta',
-    'get-channel',
-    'unset-channel',
-    'queue-boot-verify-persisted-config',
-  ],
-  'manual-zip-config-guards': [
-    'set-custom-id',
-    'set-app-id',
-    'set-update-url',
-    'set-stats-url',
-    'set-channel-url',
-    'set-channel-beta',
-    'get-channel',
-    'set-channel-private',
-    'unset-channel',
-    'queue-boot-verify-persisted-config',
-  ],
-};
+
+function getSmokeSequenceActionIdsByScenario() {
+  if (window.cordova?.platformId) {
+    platform = window.cordova.platformId;
+  }
+  return {
+    'manual-zip': getManualZipSmokeActionIds(),
+    'manual-zip-no-persist': [
+      'set-custom-id',
+      'set-app-id',
+      'set-update-url',
+      'set-stats-url',
+      'set-channel-url',
+      'set-channel-beta',
+      'get-channel',
+      'unset-channel',
+      'queue-boot-verify-persisted-config',
+    ],
+    'manual-zip-config-guards': [
+      'set-custom-id',
+      'set-app-id',
+      'set-update-url',
+      'set-stats-url',
+      'set-channel-url',
+      'set-channel-beta',
+      'get-channel',
+      'set-channel-private',
+      'unset-channel',
+      'queue-boot-verify-persisted-config',
+    ],
+  };
+}
 
 const state = {
   autoUpdateAvailable: 'loading',
@@ -2820,7 +2832,7 @@ async function runSmokeSequence() {
 
 function getSmokeSequenceActions() {
   const visibleActions = getVisibleActions();
-  const overrideIds = smokeSequenceActionIdsByScenario[scenarioId];
+  const overrideIds = getSmokeSequenceActionIdsByScenario()[scenarioId];
   const isExcludedFromCoreSmoke = (action) => action && coreSmokeExcludedActionIds.has(action.id);
 
   if (!overrideIds) {
