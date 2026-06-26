@@ -4,7 +4,7 @@ appId: app.capgo.updater
 - launchApp
 - extendedWaitUntil:
     visible: '@capgo/cordova-updater'
-    timeout: 360000
+    timeout: 180000
 - assertVisible: '@capgo/cordova-updater'
 - extendedWaitUntil:
     visible: '.*Harness: ready.*'
