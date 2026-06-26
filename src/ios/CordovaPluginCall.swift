@@ -5,7 +5,7 @@ import Cordova
 
 class CordovaPluginCall {
     private let command: CDVInvokedUrlCommand
-    private weak var plugin: CDVPlugin?
+    private unowned var plugin: CDVPlugin
     private var finished = false
 
     var callbackId: String {
@@ -137,11 +137,11 @@ class CordovaPluginCall {
         sendResult(status: CDVCommandStatus_ERROR, message: composed)
     }
 
-    private func sendOnMainThread(_ send: @escaping () -> Void) {
+    private func sendOnMainThread(_ send: () -> Void) {
         if Thread.isMainThread {
             send()
         } else {
-            DispatchQueue.main.async {
+            DispatchQueue.main.sync {
                 send()
             }
         }
@@ -152,10 +152,6 @@ class CordovaPluginCall {
             return
         }
         finished = true
-        guard let plugin else {
-            return
-        }
-
         let result: CDVPluginResult
         switch message {
         case let dictionary as [AnyHashable: Any]:
@@ -170,31 +166,25 @@ class CordovaPluginCall {
 
         let callbackId = self.callbackId
         sendOnMainThread {
-            plugin.commandDelegate.send(result, callbackId: callbackId)
+            self.plugin.commandDelegate.send(result, callbackId: callbackId)
         }
     }
 
     func sendKeepAliveResult(_ data: JSObject) {
-        guard let plugin else {
-            return
-        }
         let result = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: data as [AnyHashable: Any])!
         result.setKeepCallbackAs(true)
         let callbackId = self.callbackId
         sendOnMainThread {
-            plugin.commandDelegate.send(result, callbackId: callbackId)
+            self.plugin.commandDelegate.send(result, callbackId: callbackId)
         }
     }
 
     func sendNoResultKeepAlive() {
-        guard let plugin else {
-            return
-        }
         let result = CDVPluginResult(status: CDVCommandStatus_NO_RESULT)!
         result.setKeepCallbackAs(true)
         let callbackId = self.callbackId
         sendOnMainThread {
-            plugin.commandDelegate.send(result, callbackId: callbackId)
+            self.plugin.commandDelegate.send(result, callbackId: callbackId)
         }
     }
 }
