@@ -201,10 +201,18 @@ jobs:
           for scenario in "${scenarios[@]}"; do
             app_artifact_path="$artifact_root/$scenario"
             bun scripts/maestro/prepare-ios-scenario.mjs "$scenario"
-            (cd example-app && npx cordova build ios --emulator)
-            app_path="$(bun --eval "import { findExampleIosAppPath } from './scripts/maestro/scenarios.mjs'; const appPath = findExampleIosAppPath(); if (!appPath) { throw new Error('Missing iOS app build output'); } console.log(appPath);")"
+            (cd example-app/platforms/ios && pod install --repo-update)
+            derived_data_path="$RUNNER_TEMP/maestro-ios-derived-$scenario"
+            rm -rf "$derived_data_path"
+            xcodebuild               -workspace "example-app/platforms/ios/Updater Example.xcworkspace"               -scheme "Updater Example"               -configuration Debug               -destination "generic/platform=iOS Simulator"               -derivedDataPath "$derived_data_path"               SWIFT_VERSION=5.0               IPHONEOS_DEPLOYMENT_TARGET=15.0               build
+            app_path="$derived_data_path/Build/Products/Debug-iphonesimulator/Updater Example.app"
             if [[ ! -d "$app_path" ]]; then
               echo "Expected iOS app at $app_path" >&2
+              exit 1
+            fi
+            bundled_index="$app_path/www/index.html"
+            if [[ ! -f "$bundled_index" ]]; then
+              echo "Missing bundled www/index.html at $bundled_index" >&2
               exit 1
             fi
             mkdir -p "$app_artifact_path"
