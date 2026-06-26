@@ -3119,9 +3119,14 @@ async function bootstrap() {
   renderState();
   await attachListeners();
 
+  if (!state.harnessReady) {
+    state.harnessReady = true;
+    renderState();
+  }
+
   if (!skipNotifyAppReady) {
     try {
-      await performNotifyAppReady();
+      await withTimeout('bootstrap notifyAppReady()', () => performNotifyAppReady(), 30000);
     } catch (error) {
       console.error('notifyAppReady() bootstrap failed', error);
     }
@@ -3198,6 +3203,6 @@ document.addEventListener('deviceready', startHarnessFromCordova, false);
 document.addEventListener('capgo-cordova-ready', startHarnessFromCordova, false);
 
 // ES modules load after cordova.js; deviceready may already have fired on iOS.
-if (window.cordova?.platformId) {
+if (window.__capgoCordovaReady || window.cordova?.platformId) {
   startHarnessFromCordova();
 }

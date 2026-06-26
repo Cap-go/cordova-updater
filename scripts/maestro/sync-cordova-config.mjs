@@ -164,6 +164,25 @@ async function syncConfigXml() {
   await writeFile(configPath, xml, 'utf8');
 }
 
+
+async function normalizeCordovaWebViewHtml(indexPath) {
+  let html = await readFile(indexPath, 'utf8');
+  const original = html;
+
+  html = html.replace(
+    /<script type="module"(?:\s+crossorigin(?:="anonymous")?)?\s+src="(\.\/assets\/[^"]+)"><\/script>/g,
+    '<script src="$1"></script>',
+  );
+  html = html.replace(
+    /<link rel="stylesheet"(?:\s+crossorigin(?:="anonymous")?)?\s+href="(\.\/assets\/[^"]+)">/g,
+    '<link rel="stylesheet" href="$1">',
+  );
+
+  if (html !== original) {
+    await writeFile(indexPath, html, 'utf8');
+  }
+}
+
 async function injectCordovaBootstrap(indexPath) {
   let html = await readFile(indexPath, 'utf8');
   if (html.includes('capgo-cordova-ready-bridge')) {
@@ -173,7 +192,12 @@ async function injectCordovaBootstrap(indexPath) {
   const cordovaTags = `<script src="cordova.js"></script>
     <script id="capgo-cordova-ready-bridge">
       (function () {
+        window.__capgoCordovaReady = false;
         function notifyReady() {
+          if (window.__capgoCordovaReady) {
+            return;
+          }
+          window.__capgoCordovaReady = true;
           window.dispatchEvent(new CustomEvent('capgo-cordova-ready'));
         }
         document.addEventListener('deviceready', notifyReady, false);
@@ -199,8 +223,12 @@ async function syncWebAssets() {
   const wwwDir = path.join(exampleAppDir, 'www');
   await mkdir(wwwDir, { recursive: true });
   await cp(distDir, wwwDir, { recursive: true, force: true });
-  await injectCordovaBootstrap(path.join(wwwDir, 'index.html'));
-  await injectCordovaBootstrap(path.join(distDir, 'index.html'));
+  const wwwIndexPath = path.join(wwwDir, 'index.html');
+  const distIndexPath = path.join(distDir, 'index.html');
+  await injectCordovaBootstrap(wwwIndexPath);
+  await injectCordovaBootstrap(distIndexPath);
+  await normalizeCordovaWebViewHtml(wwwIndexPath);
+  await normalizeCordovaWebViewHtml(distIndexPath);
 }
 
 
