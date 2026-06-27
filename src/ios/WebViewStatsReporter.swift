@@ -1,4 +1,3 @@
-import Capacitor
 import Foundation
 import WebKit
 
@@ -8,7 +7,7 @@ final class WebViewStatsReporter {
       if(window.__capgoWebViewErrorReporterInstalled){return;}
       window.__capgoWebViewErrorReporterInstalled=true;
       var maxReports=20,sentReports=0,queue=[],seen={};
-      var sessionKey='CapacitorUpdater.webViewSession';
+      var sessionKey='CordovaUpdater.webViewSession';
       var sessionId=String(Date.now())+'-'+Math.random().toString(36).slice(2);
       function s(value){
         try{
@@ -23,9 +22,8 @@ final class WebViewStatsReporter {
         try{return value&&value.stack?String(value.stack):'';}catch(_){return '';}
       }
       function updater(){
-        var cap=window.Capacitor;
-        if(!cap||!cap.Plugins){return null;}
-        return cap.Plugins.CapacitorUpdater||null;
+        if(!window.cordova||!window.cordova.plugins){return null;}
+        return window.cordova.plugins.Updater||null;
       }
       function flush(){
         var plugin=updater();
@@ -146,7 +144,7 @@ final class WebViewStatsReporter {
         webView.evaluateJavaScript(Self.script, completionHandler: nil)
     }
 
-    func reportError(_ call: CAPPluginCall) {
+    func reportError(_ call: CordovaPluginCall) {
         let errorType = call.getString("type") ?? "javascript_error"
         let current = implementation.getCurrentBundle()
         implementation.sendStats(

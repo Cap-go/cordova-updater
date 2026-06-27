@@ -66,7 +66,7 @@
         </config-file>
 
         <resource-file src="src/android/capgo-updater.xml" target="res/values/capgo-updater.xml"/>
-        <config-file target="res/values/capgo-updater.xml" parent="/resources">
+                <config-file target="res/values/capgo-updater.xml" parent="/resources">
             <string name="capgo_updater_app_id">$APP_ID</string>
             <string name="capgo_updater_default_channel">$DEFAULT_CHANNEL</string>
             <string name="capgo_updater_update_url">$UPDATE_URL</string>
@@ -124,6 +124,7 @@
         <source-file src="src/android/app/capgo/cordova/updater/ShakeDetector.java" target-dir="src/app/capgo/cordova/updater"/>
         <source-file src="src/android/app/capgo/cordova/updater/ShakeMenu.java" target-dir="src/app/capgo/cordova/updater"/>
         <source-file src="src/android/app/capgo/cordova/updater/ThreeFingerPinchDetector.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/compat/JSArray.java" target-dir="src/app/capgo/cordova/updater/compat"/>
         <source-file src="src/android/app/capgo/cordova/updater/compat/JSObject.java" target-dir="src/app/capgo/cordova/updater/compat"/>
         <source-file src="src/android/app/capgo/cordova/updater/compat/PluginCall.java" target-dir="src/app/capgo/cordova/updater/compat"/>
     </platform>
@@ -145,6 +146,29 @@
         <config-file target="*-Info.plist" parent="CapgoUpdaterPublicKey"><string>$PUBLIC_KEY</string></config-file>
         <config-file target="*-Info.plist" parent="CapgoUpdaterAppReadyTimeout"><string>$APP_READY_TIMEOUT</string></config-file>
         <config-file target="*-Info.plist" parent="CapgoUpdaterResponseTimeout"><string>$RESPONSE_TIMEOUT</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAutoDeleteFailed"><string>$AUTO_DELETE_FAILED</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAutoDeletePrevious"><string>$AUTO_DELETE_PREVIOUS</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterResetWhenUpdate"><string>$RESET_WHEN_UPDATE</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterPeriodCheckDelay"><string>$PERIOD_CHECK_DELAY</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAllowModifyUrl"><string>$ALLOW_MODIFY_URL</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAllowModifyAppId"><string>$ALLOW_MODIFY_APP_ID</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAllowManualBundleError"><string>$ALLOW_MANUAL_BUNDLE_ERROR</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAllowPreview"><string>$ALLOW_PREVIEW</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAllowSetDefaultChannel"><string>$ALLOW_SET_DEFAULT_CHANNEL</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAutoSplashscreen"><string>$AUTO_SPLASHSCREEN</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAutoSplashscreenLoader"><string>$AUTO_SPLASHSCREEN_LOADER</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAutoSplashscreenTimeout"><string>$AUTO_SPLASHSCREEN_TIMEOUT</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterShakeMenu"><string>$SHAKE_MENU</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAllowShakeChannelSelector"><string>$ALLOW_SHAKE_CHANNEL_SELECTOR</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterShakeMenuGesture"><string>$SHAKE_MENU_GESTURE</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterKeepUrlPathAfterReload"><string>$KEEP_URL_PATH_AFTER_RELOAD</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterDirectUpdate"><string>$DIRECT_UPDATE</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterVersion"><string>$VERSION</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterOsLogging"><string>$OS_LOGGING</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterDisableJsLogging"><string>$DISABLE_JS_LOGGING</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterPersistCustomId"><string>$PERSIST_CUSTOM_ID</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterPersistModifyUrl"><string>$PERSIST_MODIFY_URL</string></config-file>
+
 
         <source-file src="src/ios/AES.swift"/>
         <source-file src="src/ios/AppHealthTracker.swift"/>
@@ -153,6 +177,9 @@
         <source-file src="src/ios/BundleStatus.swift"/>
         <source-file src="src/ios/CapgoUpdater.swift"/>
         <source-file src="src/ios/CordovaUpdaterPlugin.swift"/>
+        <source-file src="src/ios/CordovaPluginCall.swift"/>
+        <source-file src="src/ios/CordovaCompat.swift"/>
+        <source-file src="src/ios/CordovaUpdaterCommands.swift"/>
         <source-file src="src/ios/CryptoCipher.swift"/>
         <source-file src="src/ios/DelayCondition.swift"/>
         <source-file src="src/ios/DelayUntilNext.swift"/>
@@ -165,5 +192,14 @@
         <source-file src="src/ios/UpdaterSchemeHandler.swift"/>
         <source-file src="src/ios/UserDefaultsExtension.swift"/>
         <source-file src="src/ios/WebViewStatsReporter.swift"/>
+
+        <podspec>
+            <pods use-frameworks="true">
+                <pod name="Alamofire" spec="~> 5.11.0" />
+                <pod name="ZIPFoundation" spec="~> 0.9.20" />
+                <pod name="Version" spec="0.8.0" />
+                <pod name="BigInt" spec="~> 5.2.0" />
+            </pods>
+        </podspec>
     </platform>
 </plugin>

@@ -5,7 +5,9 @@
  */
 
 import Foundation
+#if SWIFT_PACKAGE
 import Cordova
+#endif
 import UIKit
 import WebKit
 import Version
@@ -17,11 +19,20 @@ import Version
 @objc(CapgoCordovaUpdaterPlugin)
 public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     private var schemeHandler: UpdaterSchemeHandler?
-    private var cordovaListeners: [String: String] = [:]
+    private struct ListenerRegistration {
+        let eventName: String
+        let callbackId: String
+    }
+
+    private var cordovaListeners: [String: ListenerRegistration] = [:]
+    private var savedCalls: [String: CordovaPluginCall] = [:]
+    private let listenerStateQueue = DispatchQueue(label: "ee.forgr.capgo.cordovaUpdater.listenerState")
+    private var savedAppUpdateCall: CordovaPluginCall?
 
     public override func pluginInitialize() {
         super.pluginInitialize()
         schemeHandler = UpdaterSchemeHandler()
+        loadPlugin()
     }
 
     public func overrideSchemeTask(_ task: WKURLSchemeTask) -> Bool {
@@ -32,8 +43,15 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         schemeHandler?.stop(task: task)
     }
 
+    private func plistConfigKey(_ key: String) -> String {
+        guard let first = key.first else {
+            return "CapgoUpdater" + key
+        }
+        return "CapgoUpdater" + first.uppercased() + key.dropFirst()
+    }
+
     private func readConfigString(_ key: String, _ defaultValue: String? = nil) -> String? {
-        guard let value = Bundle.main.object(forInfoDictionaryKey: "CapgoUpdater" + key.capitalized) as? String, !value.trimmingCharacters(in: .whitespaces).isEmpty else {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: plistConfigKey(key)) as? String, !value.trimmingCharacters(in: .whitespaces).isEmpty else {
             return defaultValue
         }
         return value
@@ -162,8 +180,6 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     public var shakeMenuEnabled = false
     public var shakeChannelSelectorEnabled = false
     public var shakeMenuGesture = CordovaUpdaterPlugin.shakeMenuGestureShake
-    var shakeMenuPinchGestureRecognizer: ThreeFingerPinchGestureRecognizer?
-    var shakeMenuPinchGestureTriggered = false
     public var previewSessionEnabled = false
     private var previewSessionAlertPending = false
     private var isLeavingPreviewForIncomingLink = false
@@ -172,10 +188,10 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
 
     private var delayUpdateUtils: DelayUpdateUtils!
 
-    override public func load() {
+    func loadPlugin() {
         let disableJSLogging = readConfigBool("disableJSLogging", false)
         // Set webView for logging to JavaScript console
-        if let webView = self.bridge?.webView, !disableJSLogging {
+        if let webView = self.updaterWebView, !disableJSLogging {
             logger.setWebView(webView: webView)
             logger.info("WebView set successfully for logging")
         } else {
@@ -183,7 +199,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
         let webViewStatsReporter = WebViewStatsReporter(implementation: implementation)
         self.webViewStatsReporter = webViewStatsReporter
-        webViewStatsReporter.install(on: self.bridge?.webView)
+        webViewStatsReporter.install(on: self.updaterWebView)
         #if targetEnvironment(simulator)
         logger.info("::::: SIMULATOR :::::")
         logger.info("Application directory: \(NSHomeDirectory())")
@@ -256,7 +272,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         implementation.notifyDownloadRaw = notifyDownload
         implementation.notifyListeners = { [weak self] eventName, data in
             let emit = {
-                self?.notifyListeners(eventName, data: data)
+                self?.notifyJSListeners(eventName, data: data)
             }
             if Thread.isMainThread {
                 emit()
@@ -279,13 +295,11 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
 
         // Initialize DelayUpdateUtils
         self.delayUpdateUtils = DelayUpdateUtils(currentVersionNative: currentVersionNative, logger: logger)
-        let config = (self.bridge?.viewController as? CAPBridgeViewController)?.instanceDescriptor().legacyConfig
         implementation.appId = Bundle.main.infoDictionary?["CFBundleIdentifier"] as? String ?? ""
-        implementation.appId = config?["appId"] as? String ?? implementation.appId
         implementation.appId = readConfigString("appId", implementation.appId)!
         if implementation.appId == "" {
             // crash the app on purpose it should not happen
-            fatalError("appId is missing in capacitor.config.json or plugin config, and cannot be retrieved from the native app, please add it globally or in the plugin config")
+            fatalError("appId is missing in plugin config (CapgoUpdaterAppId), and cannot be retrieved from the native app")
         }
         if shouldClearPreviewSessionBecauseDisabled {
             clearPreviewSessionBecauseDisabled()
@@ -388,13 +402,13 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         notificationCenter.addObserver(
             self,
             selector: #selector(handleOpenURLForPreviewSession(notification:)),
-            name: Notification.Name.capacitorOpenURL,
+            name: Notification.Name("CDVPluginHandleOpenURLNotification"),
             object: nil
         )
         notificationCenter.addObserver(
             self,
             selector: #selector(handleOpenURLForPreviewSession(notification:)),
-            name: Notification.Name.capacitorOpenUniversalLink,
+            name: Notification.Name("CDVPluginHandleOpenURLWithAppSourceAndAnnotationNotification"),
             object: nil
         )
     }
@@ -407,7 +421,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             script = "(function(){ try { localStorage.removeItem('\(keepUrlPathFlagKey)'); } catch (err) {} delete window.__capgoKeepUrlPathAfterReload; var evt; try { evt = new CustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', { detail: { enabled: false } }); } catch (e) { evt = document.createEvent('CustomEvent'); evt.initCustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', false, false, { enabled: false }); } window.dispatchEvent(evt); })();"
         }
         DispatchQueue.main.async { [weak self] in
-            guard let self = self, let webView = self.bridge?.webView else {
+            guard let self = self, let webView = self.updaterWebView else {
                 return
             }
             if self.keepUrlPathFlagLastValue != enabled {
@@ -454,7 +468,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         appHealthTracker?.reportMemoryWarning()
     }
 
-    @objc func reportWebViewError(_ call: CAPPluginCall) {
+    func reportWebViewError(_ call: CAPPluginCall) {
         guard let webViewStatsReporter = webViewStatsReporter else {
             call.resolve()
             return
@@ -463,7 +477,6 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     }
 
     private func initialLoad() -> Bool {
-        guard let bridge = self.bridge else { return false }
         if keepUrlPathAfterReload {
             syncKeepUrlPathFlag(enabled: true)
         }
@@ -709,17 +722,11 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
 
     private func resolveCall(_ call: CAPPluginCall, data: PluginCallResultData? = nil) {
         let resolve = {
-            let savedCall = self.bridge?.savedCall(withID: call.callbackId)
-            let targetCall = savedCall ?? call
-
+            let targetCall = self.savedCalls.removeValue(forKey: call.callbackId) ?? call
             if let data {
                 targetCall.resolve(data)
             } else {
                 targetCall.resolve()
-            }
-
-            if savedCall != nil {
-                self.bridge?.releaseCall(withID: call.callbackId)
             }
         }
 
@@ -734,14 +741,8 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
 
     private func rejectCall(_ call: CAPPluginCall, message: String, code: String? = nil, error: Error? = nil, data: PluginCallResultData? = nil) {
         let reject = {
-            let savedCall = self.bridge?.savedCall(withID: call.callbackId)
-            let targetCall = savedCall ?? call
-
-            targetCall.reject(message, code, error, data)
-
-            if savedCall != nil {
-                self.bridge?.releaseCall(withID: call.callbackId)
-            }
+            let targetCall = self.savedCalls.removeValue(forKey: call.callbackId) ?? call
+            targetCall.reject(message, code, error: error, data: data)
         }
 
         if Thread.isMainThread {
@@ -754,12 +755,14 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     }
 
     private func saveCallForAsyncHandling(_ call: CAPPluginCall) {
-        bridge?.saveCall(call)
+        listenerStateQueue.sync {
+            savedCalls[call.callbackId] = call
+        }
     }
 
     private func notifyListenersOnMain(_ eventName: String, data: JSObject) {
         let notify = {
-            self.notifyListeners(eventName, data: data)
+            self.notifyJSListeners(eventName, data: data)
         }
 
         if Thread.isMainThread {
@@ -769,6 +772,65 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
                 notify()
             }
         }
+    }
+
+    func notifyJSListeners(_ eventName: String, data: JSObject) {
+        let targetCalls: [CordovaPluginCall] = listenerStateQueue.sync {
+            cordovaListeners.values
+                .filter { $0.eventName == eventName }
+                .compactMap { savedCalls[$0.callbackId] }
+        }
+        for call in targetCalls {
+            call.sendKeepAliveResult(data)
+        }
+    }
+
+    func addListener(_ call: CAPPluginCall) {
+        guard let eventName = call.getString("eventName"), !eventName.isEmpty else {
+            call.reject("eventName must be provided.")
+            return
+        }
+        guard let listenerId = call.getString("listenerId"), !listenerId.isEmpty else {
+            call.reject("listenerId must be provided.")
+            return
+        }
+        listenerStateQueue.sync {
+            savedCalls[call.callbackId] = call
+            cordovaListeners[listenerId] = ListenerRegistration(eventName: eventName, callbackId: call.callbackId)
+        }
+        call.sendNoResultKeepAlive()
+    }
+
+    func removeListener(_ call: CAPPluginCall) {
+        guard let listenerId = call.getString("listenerId"), !listenerId.isEmpty else {
+            call.reject("listenerId must be provided.")
+            return
+        }
+        listenerStateQueue.sync {
+            if let registration = cordovaListeners.removeValue(forKey: listenerId) {
+                savedCalls.removeValue(forKey: registration.callbackId)
+            }
+        }
+        call.resolve()
+    }
+
+    func removeAllListeners(_ call: CAPPluginCall) {
+        listenerStateQueue.sync {
+            let callbackIds = Set(cordovaListeners.values.map { $0.callbackId })
+            for callbackId in callbackIds {
+                savedCalls.removeValue(forKey: callbackId)
+            }
+            cordovaListeners.removeAll()
+        }
+        call.resolve()
+    }
+
+    var updaterWebView: WKWebView? {
+#if SWIFT_PACKAGE
+        return (self.webView as? WKWebView) ?? (self.webViewEngine as? WKWebView)
+#else
+        return (self.webView as? WKWebView) ?? (self.webViewEngine?.engineWebView as? WKWebView)
+#endif
     }
 
     private func bundlePayload(_ bundleInfo: BundleInfo) -> JSObject {
@@ -795,7 +857,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    @objc func setUpdateUrl(_ call: CAPPluginCall) {
+    func setUpdateUrl(_ call: CAPPluginCall) {
         if !readConfigBool("allowModifyUrl", false) {
             logger.error("setUpdateUrl called without allowModifyUrl")
             call.reject("setUpdateUrl called without allowModifyUrl set allowModifyUrl in your config to true to allow it")
@@ -818,7 +880,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         return updateUrl
     }
 
-    @objc func setStatsUrl(_ call: CAPPluginCall) {
+    func setStatsUrl(_ call: CAPPluginCall) {
         if !readConfigBool("allowModifyUrl", false) {
             logger.error("setStatsUrl called without allowModifyUrl")
             call.reject("setStatsUrl called without allowModifyUrl set allowModifyUrl in your config to true to allow it")
@@ -837,7 +899,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         call.resolve()
     }
 
-    @objc func setChannelUrl(_ call: CAPPluginCall) {
+    func setChannelUrl(_ call: CAPPluginCall) {
         if !readConfigBool("allowModifyUrl", false) {
             logger.error("setChannelUrl called without allowModifyUrl")
             call.reject("setChannelUrl called without allowModifyUrl set allowModifyUrl in your config to true to allow it")
@@ -856,15 +918,15 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         call.resolve()
     }
 
-    @objc func getBuiltinVersion(_ call: CAPPluginCall) {
+    func getBuiltinVersion(_ call: CAPPluginCall) {
         call.resolve(["version": implementation.versionBuild])
     }
 
-    @objc func getDeviceId(_ call: CAPPluginCall) {
+    func getDeviceId(_ call: CAPPluginCall) {
         call.resolve(["deviceId": implementation.deviceID])
     }
 
-    @objc func getPluginVersion(_ call: CAPPluginCall) {
+    func getPluginVersion(_ call: CAPPluginCall) {
         call.resolve(["version": self.pluginVersion])
     }
 
@@ -1161,7 +1223,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         return next
     }
 
-    @objc func download(_ call: CAPPluginCall) {
+    func download(_ call: CAPPluginCall) {
         guard let urlString = call.getString("url") else {
             logger.error("Download called without url")
             call.reject("Download called without url")
@@ -1211,49 +1273,44 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    private func applyCurrentBundleToBridge(_ bridge: CAPBridgeProtocol) -> Bool {
+    private func applyCurrentBundleToSchemeHandler() -> Bool {
         let id = self.implementation.getCurrentBundleId()
         let dest = self.currentReloadDestination()
         logger.info("Reloading \(id)")
 
-        guard let vc = bridge.viewController as? CAPBridgeViewController else {
-            self.logger.error("Cannot get viewController")
-            return false
-        }
-        guard let capBridge = vc.bridge else {
-            self.logger.error("Cannot get capBridge")
-            return false
-        }
         if self.keepUrlPathAfterReload {
-            if let currentURL = vc.webView?.url {
-                capBridge.setServerBasePath(dest.path)
-                var urlComponents = URLComponents(url: capBridge.config.serverURL, resolvingAgainstBaseURL: false)!
-                urlComponents.path = currentURL.path
-                urlComponents.query = currentURL.query
-                urlComponents.fragment = currentURL.fragment
-                if let finalUrl = urlComponents.url {
-                    _ = vc.webView?.load(URLRequest(url: finalUrl))
-                } else {
-                    self.logger.error("Unable to build final URL when keeping path after reload; falling back to base path")
-                    vc.setServerBasePath(path: dest.path)
-                }
-            } else {
-                self.logger.error("vc.webView?.url is null? Falling back to base path reload.")
-                vc.setServerBasePath(path: dest.path)
+            self.syncKeepUrlPathFlag(enabled: true)
+        }
+
+        self.schemeHandler?.activeBundleDir = dest
+
+        let reloadWebView = {
+            guard let webView = self.updaterWebView else {
+                self.logger.error("Cannot get webView for reload")
+                return
             }
+            if self.keepUrlPathAfterReload {
+                webView.reload()
+            } else {
+                let fallback = URL(string: "https://localhost/index.html")!
+                let target = webView.url ?? fallback
+                webView.load(URLRequest(url: target))
+            }
+        }
+
+        if Thread.isMainThread {
+            reloadWebView()
         } else {
-            vc.setServerBasePath(path: dest.path)
+            DispatchQueue.main.async {
+                reloadWebView()
+            }
         }
         return true
     }
 
     func restoreLiveBundleStateAfterFailedReload() {
-        guard let bridge = self.bridge else {
-            return
-        }
-
         let restoreLiveState = {
-            _ = self.applyCurrentBundleToBridge(bridge)
+            _ = self.applyCurrentBundleToSchemeHandler()
         }
 
         if Thread.isMainThread {
@@ -1266,15 +1323,14 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     }
 
     public func _reload() -> Bool {
-        guard let bridge = self.bridge else { return false }
         self.semaphoreUp()
 
         let performReload: () -> Bool = {
-            guard self.applyCurrentBundleToBridge(bridge) else {
+            guard self.applyCurrentBundleToSchemeHandler() else {
                 return false
             }
             self.checkAppReady()
-            self.notifyListeners("appReloaded", data: [:])
+            self.notifyJSListeners("appReloaded", data: [:])
             return true
         }
 
@@ -1290,14 +1346,12 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     }
 
     func reloadWithoutWaitingForAppReady() -> Bool {
-        guard let bridge = self.bridge else { return false }
-
         let performReload: () -> Bool = {
-            guard self.applyCurrentBundleToBridge(bridge) else {
+            guard self.applyCurrentBundleToSchemeHandler() else {
                 return false
             }
             self.checkAppReady()
-            self.notifyListeners("appReloaded", data: [:])
+            self.notifyJSListeners("appReloaded", data: [:])
             return true
         }
 
@@ -1312,7 +1366,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    @objc func reload(_ call: CAPPluginCall) {
+    func reload(_ call: CAPPluginCall) {
         let current: BundleInfo = self.implementation.getCurrentBundle()
         let next: BundleInfo? = self.implementation.getNextBundle()
 
@@ -1380,7 +1434,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         return false
     }
 
-    @objc func next(_ call: CAPPluginCall) {
+    func next(_ call: CAPPluginCall) {
         guard let id = call.getString("id") else {
             logger.error("Next called without id")
             call.reject("Next called without id")
@@ -1395,7 +1449,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    @objc func set(_ call: CAPPluginCall) {
+    func set(_ call: CAPPluginCall) {
         guard let id = call.getString("id") else {
             logger.error("Set called without id")
             call.reject("Set called without id")
@@ -1502,7 +1556,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         UserDefaults.standard.synchronize()
     }
 
-    @objc func startPreviewSession(_ call: CAPPluginCall) {
+    func startPreviewSession(_ call: CAPPluginCall) {
         guard self.allowPreview else {
             self.hidePreviewTransitionLoader(reason: "preview-session-not-allowed")
             logger.error("startPreviewSession called without allowPreview")
@@ -1554,7 +1608,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         call.resolve()
     }
 
-    @objc func listPreviews(_ call: CAPPluginCall) {
+    func listPreviews(_ call: CAPPluginCall) {
         guard self.allowPreview else {
             call.reject("listPreviews not allowed. Set allowPreview to true in your config to enable it.")
             return
@@ -1574,7 +1628,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         call.resolve(result)
     }
 
-    @objc func setPreview(_ call: CAPPluginCall) {
+    func setPreview(_ call: CAPPluginCall) {
         guard self.allowPreview else {
             call.reject("setPreview not allowed. Set allowPreview to true in your config to enable it.")
             return
@@ -1652,7 +1706,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         return true
     }
 
-    @objc func resetPreview(_ call: CAPPluginCall) {
+    func resetPreview(_ call: CAPPluginCall) {
         guard self.previewSessionEnabled else {
             call.resolve()
             return
@@ -1666,7 +1720,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    @objc func deletePreview(_ call: CAPPluginCall) {
+    func deletePreview(_ call: CAPPluginCall) {
         guard self.allowPreview else {
             call.reject("deletePreview not allowed. Set allowPreview to true in your config to enable it.")
             return
@@ -1694,11 +1748,11 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         call.resolve(["removed": removed, "deleted": deleted])
     }
 
-    @objc func checkPreviewUpdate(_ call: CAPPluginCall) {
+    func checkPreviewUpdate(_ call: CAPPluginCall) {
         self.handlePreviewUpdate(call, shouldDownload: false)
     }
 
-    @objc func updatePreview(_ call: CAPPluginCall) {
+    func updatePreview(_ call: CAPPluginCall) {
         self.handlePreviewUpdate(call, shouldDownload: true)
     }
 
@@ -1795,21 +1849,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     }
 
     private func leavePreviewSessionForLaunchURLIfNeeded() {
-        guard self.previewSessionEnabled,
-              !self.isLeavingPreviewForIncomingLink,
-              let launchUrl = ApplicationDelegateProxy.shared.lastURL,
-              self.isPreviewDeepLink(launchUrl) else {
-            return
-        }
-
-        self.isLeavingPreviewForIncomingLink = true
-        self.showPreviewTransitionLoader(reason: "preview-launch-deeplink")
-        logger.info("Preview deeplink launch detected while preview session is active; restoring fallback before initial load")
-        if !self.leavePreviewSessionWithoutReload() {
-            logger.error("Could not leave preview session before initial preview deeplink routing")
-            self.isLeavingPreviewForIncomingLink = false
-            self.hidePreviewTransitionLoader(reason: "preview-launch-deeplink-failed")
-        }
+        // Cordova cold-start launch URLs are delivered via CDVPluginHandleOpenURLNotification after plugin init.
     }
 
     private func leavePreviewSessionWithoutReload(keepPreviewGuard: Bool = false) -> Bool {
@@ -2254,7 +2294,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    @objc func delete(_ call: CAPPluginCall) {
+    func delete(_ call: CAPPluginCall) {
         guard let id = call.getString("id") else {
             logger.error("Delete called without version")
             call.reject("Delete called without id")
@@ -2269,7 +2309,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    @objc func setBundleError(_ call: CAPPluginCall) {
+    func setBundleError(_ call: CAPPluginCall) {
         if !allowManualBundleError {
             logger.error("setBundleError called without allowManualBundleError")
             call.reject("setBundleError not allowed. Set allowManualBundleError to true in your config to enable it.")
@@ -2299,7 +2339,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         call.resolve(["bundle": updated.toJSON()])
     }
 
-    @objc func list(_ call: CAPPluginCall) {
+    func list(_ call: CAPPluginCall) {
         let raw = call.getBool("raw", false)
         let res = implementation.list(raw: raw)
         var resArr: [[String: String]] = []
@@ -2311,7 +2351,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         ])
     }
 
-    @objc func getLatest(_ call: CAPPluginCall) {
+    func getLatest(_ call: CAPPluginCall) {
         let channel = call.getString("channel")
         let includeBundleSize = call.getBool("includeBundleSize", false)
         let appId = self.normalizedPreviewAppId(call.getString("appId"))
@@ -2377,7 +2417,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         res.downloadSize = self.implementation.getBundleDownloadSize(updateUrl: updateUrl, version: res.version, manifest: missing)
     }
 
-    @objc func getMissingBundleFiles(_ call: CAPPluginCall) {
+    func getMissingBundleFiles(_ call: CAPPluginCall) {
         guard let manifest = manifestEntries(from: call.getArray("manifest")) else {
             call.reject("getMissingBundleFiles called without manifest")
             return
@@ -2390,7 +2430,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    @objc func getBundleDownloadSize(_ call: CAPPluginCall) {
+    func getBundleDownloadSize(_ call: CAPPluginCall) {
         guard let manifest = manifestEntries(from: call.getArray("manifest")) else {
             call.reject("getBundleDownloadSize called without manifest")
             return
@@ -2423,7 +2463,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         return "queued"
     }
 
-    @objc func triggerUpdateCheck(_ call: CAPPluginCall) {
+    func triggerUpdateCheck(_ call: CAPPluginCall) {
         let status = self.triggerBackgroundUpdateCheck()
         call.resolve([
             "status": status,
@@ -2431,7 +2471,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         ])
     }
 
-    @objc func unsetChannel(_ call: CAPPluginCall) {
+    func unsetChannel(_ call: CAPPluginCall) {
         let triggerAutoUpdate = call.getBool("triggerAutoUpdate", false)
         self.saveCallForAsyncHandling(call)
         DispatchQueue.global(qos: .utility).async {
@@ -2457,10 +2497,10 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    @objc func setChannel(_ call: CAPPluginCall) {
+    func setChannel(_ call: CAPPluginCall) {
         guard let channel = call.getString("channel") else {
             logger.error("setChannel called without channel")
-            call.reject("setChannel called without channel", "SETCHANNEL_INVALID_PARAMS", nil, [
+            call.reject("setChannel called without channel", "SETCHANNEL_INVALID_PARAMS", error: nil, data: [
                 "message": "setChannel called without channel",
                 "error": "missing_parameter"
             ])
@@ -2503,7 +2543,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    @objc func getChannel(_ call: CAPPluginCall) {
+    func getChannel(_ call: CAPPluginCall) {
         self.saveCallForAsyncHandling(call)
         DispatchQueue.global(qos: .utility).async {
             let res = self.implementation.getChannel(defaultChannelKey: self.defaultChannelDefaultsKey)
@@ -2518,7 +2558,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    @objc func listChannels(_ call: CAPPluginCall) {
+    func listChannels(_ call: CAPPluginCall) {
         self.saveCallForAsyncHandling(call)
         DispatchQueue.global(qos: .utility).async {
             let res = self.implementation.listChannels()
@@ -2535,7 +2575,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    @objc func setCustomId(_ call: CAPPluginCall) {
+    func setCustomId(_ call: CAPPluginCall) {
         guard let customId = call.getString("customId") else {
             logger.error("setCustomId called without customId")
             call.reject("setCustomId called without customId")
@@ -2629,11 +2669,10 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     }
 
     func canPerformResetTransition() -> Bool {
-        guard let bridge = self.bridge else { return false }
-        return (bridge.viewController as? CAPBridgeViewController) != nil
+        return self.updaterWebView != nil
     }
 
-    @objc func reset(_ call: CAPPluginCall) {
+    func reset(_ call: CAPPluginCall) {
         let toLastSuccessful = call.getBool("toLastSuccessful") ?? false
         let usePendingBundle = call.getBool("usePendingBundle") ?? false
         if self._reset(toLastSuccessful: toLastSuccessful, usePendingBundle: usePendingBundle) {
@@ -2644,7 +2683,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    @objc func current(_ call: CAPPluginCall) {
+    func current(_ call: CAPPluginCall) {
         let bundle: BundleInfo = self.implementation.getCurrentBundle()
         call.resolve([
             "bundle": bundle.toJSON(),
@@ -2652,7 +2691,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         ])
     }
 
-    @objc func notifyAppReady(_ call: CAPPluginCall) {
+    func notifyAppReady(_ call: CAPPluginCall) {
         self.semaphoreDown()
         let bundle = self.implementation.getCurrentBundle()
         self.implementation.setSuccess(bundle: bundle, autoDeletePrevious: self.autoDeletePrevious)
@@ -2663,7 +2702,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         call.resolve(["bundle": bundle.toJSON()])
     }
 
-    @objc func setMultiDelay(_ call: CAPPluginCall) {
+    func setMultiDelay(_ call: CAPPluginCall) {
         guard let delayConditionList = call.getValue("delayConditions") else {
             logger.error("setMultiDelay called without delayCondition")
             call.reject("setMultiDelay called without delayCondition")
@@ -2698,7 +2737,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
 
     // Note: _setMultiDelay and _cancelDelay methods have been moved to DelayUpdateUtils class
 
-    @objc func cancelDelay(_ call: CAPPluginCall) {
+    func cancelDelay(_ call: CAPPluginCall) {
         if delayUpdateUtils.cancelDelay(source: "JS") {
             call.resolve()
         } else {
@@ -2712,24 +2751,23 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         if self.isPreviewSessionStateActive() {
             return false
         }
-        let instanceDescriptor = (self.bridge?.viewController as? CAPBridgeViewController)?.instanceDescriptor()
-        if instanceDescriptor?.serverURL != nil {
+        let serverUrl: String? = nil // Cordova: no dev server URL
+        if let serverUrl, !serverUrl.isEmpty {
             logger.warn("AutoUpdate is automatic disabled when serverUrl is set.")
         }
-        return self.autoUpdate && self.updateUrl != "" && instanceDescriptor?.serverURL == nil
+        return self.autoUpdate && self.updateUrl != "" && (serverUrl == nil || serverUrl?.isEmpty == true)
     }
 
-    @objc func isAutoUpdateEnabled(_ call: CAPPluginCall) {
+    func isAutoUpdateEnabled(_ call: CAPPluginCall) {
         call.resolve([
             "enabled": self._isAutoUpdateEnabled()
         ])
     }
 
-    @objc func isAutoUpdateAvailable(_ call: CAPPluginCall) {
-        let instanceDescriptor = (self.bridge?.viewController as? CAPBridgeViewController)?.instanceDescriptor()
-        let isAvailable = instanceDescriptor?.serverURL == nil
+    func isAutoUpdateAvailable(_ call: CAPPluginCall) {
+        let serverUrl: String? = nil // Cordova: no dev server URL
         call.resolve([
-            "available": isAvailable
+            "available": serverUrl == nil || serverUrl?.isEmpty == true
         ])
     }
 
@@ -2759,7 +2797,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         if BundleStatus.SUCCESS.storedValue != current.getStatus() {
             logger.error("notifyAppReady was not called, roll back current bundle: \(current.toString())")
             logger.error("Did you forget to call 'notifyAppReady()' in your Capacitor App code?")
-            self.notifyListeners("updateFailed", data: [
+            self.notifyJSListeners("updateFailed", data: [
                 "bundle": current.toJSON()
             ])
             self.persistLastFailedBundle(current)
@@ -2791,14 +2829,14 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     }
 
     private func notifyBundleSet(_ bundle: BundleInfo) {
-        self.notifyListeners("set", data: ["bundle": bundle.toJSON()], retainUntilConsumed: true)
+        self.notifyJSListeners("set", data: ["bundle": bundle.toJSON()])
     }
 
     func sendReadyToJs(current: BundleInfo, msg: String) {
         logger.info("sendReadyToJs")
         DispatchQueue.global().async {
             self.semaphoreWait(waitTime: self.appReadyTimeout)
-            self.notifyListeners("appReady", data: ["bundle": current.toJSON(), "status": msg], retainUntilConsumed: true)
+            self.notifyJSListeners("appReady", data: ["bundle": current.toJSON(), "status": msg])
 
             // Auto hide splashscreen if enabled
             // We show it on background when conditions are met, so we should hide it on foreground regardless of update outcome
@@ -2878,16 +2916,6 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         self.splashscreenInvocationToken += 1
     }
 
-    private func makeSplashscreenCall(callbackId: String, options: [String: Any], methodName: String) -> CAPPluginCall {
-        CAPPluginCall(callbackId: callbackId, options: options, success: { [weak self] (_, _) in
-            guard let self = self else { return }
-            self.logger.info(self.splashscreenCompletedMessage(methodName: methodName))
-        }, error: { [weak self] (_) in
-            guard let self = self else { return }
-            self.logger.error("Failed to auto-\(methodName) splashscreen")
-        })
-    }
-
     private func invokeSplashscreenMethod(
         methodName: String,
         callbackId: String,
@@ -2898,47 +2926,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         guard requestToken == self.splashscreenInvocationToken else {
             return
         }
-
-        guard let bridge = self.bridge else {
-            self.retrySplashscreenMethod(
-                methodName: methodName,
-                callbackId: callbackId,
-                options: options,
-                retriesRemaining: retriesRemaining,
-                requestToken: requestToken,
-                message: "Bridge not available for \(methodName == "show" ? "showing" : "hiding") splashscreen with autoSplashscreen"
-            )
-            return
-        }
-
-        guard let splashScreenPlugin = bridge.plugin(withName: self.splashscreenPluginName) else {
-            self.retrySplashscreenMethod(
-                methodName: methodName,
-                callbackId: callbackId,
-                options: options,
-                retriesRemaining: retriesRemaining,
-                requestToken: requestToken,
-                message: "autoSplashscreen: SplashScreen plugin not found. Install @capacitor/splash-screen plugin."
-            )
-            return
-        }
-
-        let selector = NSSelectorFromString("\(methodName):")
-        guard splashScreenPlugin.responds(to: selector) else {
-            self.retrySplashscreenMethod(
-                methodName: methodName,
-                callbackId: callbackId,
-                options: options,
-                retriesRemaining: retriesRemaining,
-                requestToken: requestToken,
-                message: "autoSplashscreen: SplashScreen plugin does not respond to \(methodName): method. Make sure @capacitor/splash-screen plugin is properly installed."
-            )
-            return
-        }
-
-        let call = self.makeSplashscreenCall(callbackId: callbackId, options: options, methodName: methodName)
-        _ = splashScreenPlugin.perform(selector, with: call)
-        self.logger.info("Called SplashScreen \(methodName) method")
+        self.logger.warn("autoSplashscreen: Cordova splash screen integration is not available; skipping \(methodName)")
     }
 
     private func retrySplashscreenMethod(
@@ -3027,7 +3015,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             guard self.splashscreenLoaderContainer == nil else {
                 return
             }
-            guard let rootView = self.bridge?.viewController?.view else {
+            guard let rootView = self.viewController?.view else {
                 self.logger.warn("autoSplashscreen: Unable to access root view for loader overlay")
                 return
             }
@@ -3088,7 +3076,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
                 return
             }
 
-            guard let rootView = self.bridge?.viewController?.view else {
+            guard let rootView = self.viewController?.view else {
                 self.logger.warn("Preview transition loader unavailable: root view missing for \(reason)")
                 self.previewTransitionLoaderRequested = false
                 return
@@ -3435,8 +3423,8 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             return
         }
         let payload: [String: Any] = ["version": version]
-        self.notifyListeners("breakingAvailable", data: payload)
-        self.notifyListeners("majorAvailable", data: payload)
+        self.notifyJSListeners("breakingAvailable", data: payload)
+        self.notifyJSListeners("majorAvailable", data: payload)
     }
 
     private func shouldNotifyBreakingEvents(response: AppVersion) -> Bool {
@@ -3476,7 +3464,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         let responseMessage = res.message?.isEmpty == false ? res.message : nil
         let message = responseMessage ?? (backendError.isEmpty ? "server did not provide a message" : backendError)
         let latestVersionName = res.version.isEmpty ? current.getVersionName() : res.version
-        self.notifyListeners("updateCheckResult", data: [
+        self.notifyJSListeners("updateCheckResult", data: [
             "kind": responseKind,
             "error": backendError,
             "message": message,
@@ -3529,10 +3517,10 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             if sendStats {
                 self.implementation.sendStats(action: failureAction, versionName: current.getVersionName())
             }
-            self.notifyListeners(failureEvent, data: ["version": latestVersionName])
+            self.notifyJSListeners(failureEvent, data: ["version": latestVersionName])
         }
         if notifyNoNeedUpdate {
-            self.notifyListeners("noNeedUpdate", data: ["bundle": current.toJSON()])
+            self.notifyJSListeners("noNeedUpdate", data: ["bundle": current.toJSON()])
         }
         self.sendReadyToJs(current: current, msg: msg)
         logger.info("endBackGroundTaskWithNotif \(msg) current: \(current.getVersionName()) latestVersionName: \(latestVersionName)")
@@ -3681,7 +3669,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
                     let builtinUpdateAvailable = !current.isBuiltin()
                     if builtinUpdateAvailable {
                         let builtinBundle = self.implementation.getBundleInfo(id: BundleInfo.ID_BUILTIN)
-                        self.notifyListeners("updateAvailable", data: ["bundle": builtinBundle.toJSON()], retainUntilConsumed: true)
+                        self.notifyJSListeners("updateAvailable", data: ["bundle": builtinBundle.toJSON()])
                     }
                     self.endBackGroundTaskWithNotif(
                         msg: "Latest version is builtin, autoUpdate onlyDownload",
@@ -3807,7 +3795,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
                             )
                         } else {
                             _ = self.implementation.setNextBundle(next: next.getId())
-                            self.notifyListeners("updateAvailable", data: ["bundle": next.toJSON()])
+                            self.notifyJSListeners("updateAvailable", data: ["bundle": next.toJSON()])
                             self.endBackGroundTaskWithNotif(
                                 msg: "Direct update reload failed, update will install next background",
                                 latestVersionName: latestVersionName,
@@ -3820,7 +3808,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
                         if plannedDirectUpdate && !directUpdateAllowed {
                             self.logger.info("Direct update skipped because splashscreen timeout occurred. Update will install on next app background.")
                         }
-                        self.notifyListeners("updateAvailable", data: ["bundle": next.toJSON()])
+                        self.notifyJSListeners("updateAvailable", data: ["bundle": next.toJSON()])
                         _ = self.implementation.setNextBundle(next: next.getId())
                         self.endBackGroundTaskWithNotif(
                             msg: "update downloaded, will install next background",
@@ -3831,7 +3819,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
                         )
                     } else {
                         self.logger.info("autoUpdate is set to onlyDownload, downloaded update will not be set as next bundle")
-                        self.notifyListeners("updateAvailable", data: ["bundle": next.toJSON()], retainUntilConsumed: true)
+                        self.notifyJSListeners("updateAvailable", data: ["bundle": next.toJSON()])
                         self.endBackGroundTaskWithNotif(
                             msg: "update downloaded, autoUpdate onlyDownload",
                             latestVersionName: latestVersionName,
@@ -3932,10 +3920,6 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
                 logger.info("Download already in progress, skipping duplicate download request")
             }
         } else {
-            let instanceDescriptor = (self.bridge?.viewController as? CAPBridgeViewController)?.instanceDescriptor()
-            if instanceDescriptor?.serverURL != nil {
-                self.implementation.sendStats(action: "blocked_by_server_url", versionName: current.getVersionName())
-            }
             logger.info("Auto update is disabled")
             self.sendReadyToJs(current: current, msg: "disabled")
         }
@@ -4024,7 +4008,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         self.installNext()
     }
 
-    @objc func getNextBundle(_ call: CAPPluginCall) {
+    func getNextBundle(_ call: CAPPluginCall) {
         let bundle = self.implementation.getNextBundle()
         if bundle == nil || bundle?.isUnknown() == true {
             call.resolve()
@@ -4034,7 +4018,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         call.resolve(bundle!.toJSON())
     }
 
-    @objc func getFailedUpdate(_ call: CAPPluginCall) {
+    func getFailedUpdate(_ call: CAPPluginCall) {
         let bundle = self.readLastFailedBundle()
         if bundle == nil || bundle?.isUnknown() == true {
             call.resolve()
@@ -4047,7 +4031,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         ])
     }
 
-    @objc func setShakeMenu(_ call: CAPPluginCall) {
+    func setShakeMenu(_ call: CAPPluginCall) {
         guard let enabled = call.getBool("enabled") else {
             logger.error("setShakeMenu called without enabled parameter")
             call.reject("setShakeMenu called without enabled parameter")
@@ -4060,14 +4044,14 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         call.resolve()
     }
 
-    @objc func isShakeMenuEnabled(_ call: CAPPluginCall) {
+    func isShakeMenuEnabled(_ call: CAPPluginCall) {
         call.resolve([
             "enabled": self.shakeMenuEnabled,
             "gesture": self.shakeMenuGesture
         ])
     }
 
-    @objc func setShakeChannelSelector(_ call: CAPPluginCall) {
+    func setShakeChannelSelector(_ call: CAPPluginCall) {
         guard let enabled = call.getBool("enabled") else {
             logger.error("setShakeChannelSelector called without enabled parameter")
             call.reject("setShakeChannelSelector called without enabled parameter")
@@ -4080,19 +4064,19 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         call.resolve()
     }
 
-    @objc func isShakeChannelSelectorEnabled(_ call: CAPPluginCall) {
+    func isShakeChannelSelectorEnabled(_ call: CAPPluginCall) {
         call.resolve([
             "enabled": self.shakeChannelSelectorEnabled
         ])
     }
 
-    @objc func getAppId(_ call: CAPPluginCall) {
+    func getAppId(_ call: CAPPluginCall) {
         call.resolve([
             "appId": implementation.appId
         ])
     }
 
-    @objc func setAppId(_ call: CAPPluginCall) {
+    func setAppId(_ call: CAPPluginCall) {
         if !readConfigBool("allowModifyAppId", false) {
             logger.error("setAppId called without allowModifyAppId")
             call.reject("setAppId called without allowModifyAppId set allowModifyAppId in your config to true to allow it")
@@ -4117,7 +4101,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         case updateInProgress = 3
     }
 
-    @objc func getAppUpdateInfo(_ call: CAPPluginCall) {
+    func getAppUpdateInfo(_ call: CAPPluginCall) {
         let country = call.getString("country", "US")
         let bundleId = implementation.appId
 
@@ -4213,7 +4197,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    @objc func openAppStore(_ call: CAPPluginCall) {
+    func openAppStore(_ call: CAPPluginCall) {
         let appId = call.getString("appId")
         let bundleId = implementation.appId
         self.saveCallForAsyncHandling(call)
@@ -4276,20 +4260,20 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
     }
 
-    @objc func performImmediateUpdate(_ call: CAPPluginCall) {
+    func performImmediateUpdate(_ call: CAPPluginCall) {
         // iOS doesn't support in-app updates like Android's Play Store
         // Redirect users to the App Store instead
         logger.warn("performImmediateUpdate is not supported on iOS. Use openAppStore() instead.")
         call.reject("In-app updates are not supported on iOS. Use openAppStore() to direct users to the App Store.", "NOT_SUPPORTED")
     }
 
-    @objc func startFlexibleUpdate(_ call: CAPPluginCall) {
+    func startFlexibleUpdate(_ call: CAPPluginCall) {
         // iOS doesn't support flexible in-app updates
         logger.warn("startFlexibleUpdate is not supported on iOS. Use openAppStore() instead.")
         call.reject("Flexible updates are not supported on iOS. Use openAppStore() to direct users to the App Store.", "NOT_SUPPORTED")
     }
 
-    @objc func completeFlexibleUpdate(_ call: CAPPluginCall) {
+    func completeFlexibleUpdate(_ call: CAPPluginCall) {
         // iOS doesn't support flexible in-app updates
         logger.warn("completeFlexibleUpdate is not supported on iOS.")
         call.reject("Flexible updates are not supported on iOS.", "NOT_SUPPORTED")

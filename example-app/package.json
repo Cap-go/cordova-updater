@@ -1,1 +1,29 @@
-{"name":"cordova-updater-example","private":true,"version":"1.0.0"}
+{
+  "name": "cordova-updater-example",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Example Cordova app for @capgo/cordova-updater",
+  "scripts": {
+    "start": "node ./node_modules/vite/bin/vite.js",
+    "build": "node ./node_modules/vite/bin/vite.js build",
+    "preview": "node ./node_modules/vite/bin/vite.js preview",
+    "cordova:prepare": "cordova prepare",
+    "cordova:build:android": "cordova build android",
+    "cordova:build:ios": "cordova build ios --emulator"
+  },
+  "devDependencies": {
+    "@capgo/cordova-updater": "file:..",
+    "cordova": "^12.0.0",
+    "cordova-android": "^15.0.0",
+    "cordova-ios": "^7.1.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.1"
+  },
+  "cordova": {
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "plugins": {}
+  }
+}

@@ -1,3 +1,4 @@
+import { readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,6 +21,7 @@ export const defaultDeviceBaseUrl = process.env.CAPGO_MAESTRO_DEVICE_BASE_URL ??
 export const exampleAppId = 'app.capgo.updater';
 export const exampleApkPath = path.join(
   exampleAppDir,
+  'platforms',
   'android',
   'app',
   'build',
@@ -28,6 +30,34 @@ export const exampleApkPath = path.join(
   'debug',
   'app-debug.apk',
 );
+
+export const exampleIosAppName = 'Updater Example.app';
+
+export function findExampleIosAppPath(baseDir = exampleAppDir) {
+  const searchRoots = [
+    path.join(baseDir, 'platforms', 'ios', 'build', 'emulator'),
+    path.join(baseDir, 'platforms', 'ios', 'build', 'device'),
+    path.join(baseDir, 'platforms', 'ios', 'build'),
+    path.join(baseDir, 'platforms', 'ios', 'build', 'Debug-iphonesimulator'),
+  ];
+
+  for (const searchRoot of searchRoots) {
+    try {
+      const entries = readdirSync(searchRoot).sort((a, b) => a.localeCompare(b));
+      if (entries.includes(exampleIosAppName)) {
+        return path.join(searchRoot, exampleIosAppName);
+      }
+      const firstApp = entries.find((entry) => entry.endsWith('.app'));
+      if (firstApp) {
+        return path.join(searchRoot, firstApp);
+      }
+    } catch {
+      // ignore missing build output directories
+    }
+  }
+
+  return null;
+}
 
 const sharedMutableConfig = {
   CAPGO_APP_READY_TIMEOUT: '60000',
@@ -240,6 +270,26 @@ export function createBuildEnv({
     VITE_CAPGO_ALLOW_SET_DEFAULT_CHANNEL: mergedEnv.CAPGO_ALLOW_SET_DEFAULT_CHANNEL ?? 'true',
     VITE_CAPGO_PERSIST_CUSTOM_ID: mergedEnv.CAPGO_PERSIST_CUSTOM_ID ?? 'false',
     VITE_CAPGO_PERSIST_MODIFY_URL: mergedEnv.CAPGO_PERSIST_MODIFY_URL ?? 'false',
+    APP_ID: mergedEnv.CAPGO_APP_ID ?? 'app.capgo.updater',
+    DEFAULT_CHANNEL: mergedEnv.CAPGO_DEFAULT_CHANNEL ?? '',
+    CAPGO_UPDATE_URL: updateUrl,
+    CAPGO_CHANNEL_URL: `${deviceBaseUrl}/api/channel?scenario=${scenarioId}`,
+    CAPGO_STATS_URL: `${deviceBaseUrl}/api/stats?scenario=${scenarioId}`,
+    UPDATE_URL: updateUrl,
+    CHANNEL_URL: `${deviceBaseUrl}/api/channel?scenario=${scenarioId}`,
+    STATS_URL: `${deviceBaseUrl}/api/stats?scenario=${scenarioId}`,
+    AUTO_UPDATE: String(autoUpdate),
+    DIRECT_UPDATE: String(directUpdate),
+    PUBLIC_KEY: mergedEnv.CAPGO_PUBLIC_KEY ?? ' ',
+    APP_READY_TIMEOUT: mergedEnv.CAPGO_APP_READY_TIMEOUT ?? '20000',
+    ALLOW_MODIFY_URL: mergedEnv.CAPGO_ALLOW_MODIFY_URL ?? 'false',
+    ALLOW_MODIFY_APP_ID: mergedEnv.CAPGO_ALLOW_MODIFY_APP_ID ?? 'false',
+    ALLOW_MANUAL_BUNDLE_ERROR: mergedEnv.CAPGO_ALLOW_MANUAL_BUNDLE_ERROR ?? 'false',
+    ALLOW_SET_DEFAULT_CHANNEL: mergedEnv.CAPGO_ALLOW_SET_DEFAULT_CHANNEL ?? 'true',
+    PERSIST_CUSTOM_ID: mergedEnv.CAPGO_PERSIST_CUSTOM_ID ?? 'false',
+    PERSIST_MODIFY_URL: mergedEnv.CAPGO_PERSIST_MODIFY_URL ?? 'false',
+    SHAKE_MENU: 'false',
+    AUTO_SPLASHSCREEN: mergedEnv.CAPGO_AUTO_SPLASHSCREEN ?? 'false',
     CAPGO_UPDATE_URL: updateUrl,
     CAPGO_STATS_URL: `${deviceBaseUrl}/api/stats?scenario=${scenarioId}`,
     CAPGO_CHANNEL_URL: `${deviceBaseUrl}/api/channel?scenario=${scenarioId}`,

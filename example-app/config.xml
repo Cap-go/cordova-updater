@@ -1,16 +1,65 @@
 <?xml version='1.0' encoding='utf-8'?>
-<widget id="app.capgo.cordova.updater.example" version="1.0.0" xmlns="http://www.w3.org/ns/widgets">
-    <name>Cordova Updater Example</name>
-    <description>Example app for @capgo/cordova-updater</description>
+<widget id="app.capgo.updater" version="1.0.0" xmlns="http://www.w3.org/ns/widgets">
+    <name>Updater Example</name>
+    <description>Example app for @capgo/cordova-updater Maestro harness</description>
     <content src="index.html" />
     <access origin="*" />
     <allow-intent href="http://*/*" />
     <allow-intent href="https://*/*" />
-    <preference name="APP_ID" value="capgo-cordova-updater-example" />
-    <preference name="UPDATE_URL" value="https://plugin.capgo.app/updates" />
-    <preference name="CHANNEL_URL" value="https://plugin.capgo.app/channel_self" />
-    <preference name="STATS_URL" value="https://plugin.capgo.app/stats" />
-    <preference name="DEFAULT_CHANNEL" value="production" />
-    <preference name="AUTO_UPDATE" value="off" />
-    <plugin name="@capgo/cordova-updater" spec=".." />
+    <preference name="APP_ID" value="app.capgo.updater" />
+    <preference name="DEFAULT_CHANNEL" value="" />
+    <preference name="UPDATE_URL" value="http://127.0.0.1:3192/api/updates/manual-zip" />
+    <preference name="CHANNEL_URL" value="http://127.0.0.1:3192/api/channel?scenario=manual-zip" />
+    <preference name="STATS_URL" value="http://127.0.0.1:3192/api/stats?scenario=manual-zip" />
+    <preference name="AUTO_UPDATE" value="false" />
+    <preference name="DIRECT_UPDATE" value="false" />
+    <preference name="PUBLIC_KEY" value=" " />
+    <preference name="APP_READY_TIMEOUT" value="60000" />
+    <preference name="RESPONSE_TIMEOUT" value="20" />
+    <preference name="AUTO_DELETE_FAILED" value="true" />
+    <preference name="AUTO_DELETE_PREVIOUS" value="true" />
+    <preference name="RESET_WHEN_UPDATE" value="true" />
+    <preference name="PERIOD_CHECK_DELAY" value="0" />
+    <preference name="ALLOW_MODIFY_URL" value="true" />
+    <preference name="ALLOW_MODIFY_APP_ID" value="true" />
+    <preference name="ALLOW_MANUAL_BUNDLE_ERROR" value="true" />
+    <preference name="ALLOW_PREVIEW" value="false" />
+    <preference name="ALLOW_SET_DEFAULT_CHANNEL" value="true" />
+    <preference name="AUTO_SPLASHSCREEN" value="false" />
+    <preference name="AUTO_SPLASHSCREEN_LOADER" value="false" />
+    <preference name="AUTO_SPLASHSCREEN_TIMEOUT" value="10000" />
+    <preference name="SHAKE_MENU" value="false" />
+    <preference name="ALLOW_SHAKE_CHANNEL_SELECTOR" value="false" />
+    <preference name="SHAKE_MENU_GESTURE" value="shake" />
+    <preference name="KEEP_URL_PATH_AFTER_RELOAD" value="false" />
+    <preference name="VERSION" value=" " />
+    <preference name="OS_LOGGING" value="true" />
+    <preference name="DISABLE_JS_LOGGING" value="false" />
+    <preference name="PERSIST_CUSTOM_ID" value="true" />
+    <preference name="PERSIST_MODIFY_URL" value="true" />
+    <preference name="AndroidJavaSourceCompatibility" value="21" />
+    <preference name="AndroidJavaTargetCompatibility" value="21" />
+    <plugin name="@capgo/cordova-updater" spec="..">
+        <variable name="APP_ID" value="app.capgo.updater" />
+        <variable name="DEFAULT_CHANNEL" value="" />
+        <variable name="UPDATE_URL" value="http://127.0.0.1:3192/api/updates/manual-zip" />
+        <variable name="CHANNEL_URL" value="http://127.0.0.1:3192/api/channel?scenario=manual-zip" />
+        <variable name="STATS_URL" value="http://127.0.0.1:3192/api/stats?scenario=manual-zip" />
+        <variable name="AUTO_UPDATE" value="false" />
+        <variable name="DIRECT_UPDATE" value="false" />
+        <variable name="PUBLIC_KEY" value=" " />
+        <variable name="APP_READY_TIMEOUT" value="60000" />
+        <variable name="ALLOW_MODIFY_URL" value="true" />
+        <variable name="ALLOW_MODIFY_APP_ID" value="true" />
+        <variable name="ALLOW_MANUAL_BUNDLE_ERROR" value="true" />
+        <variable name="ALLOW_SET_DEFAULT_CHANNEL" value="true" />
+        <variable name="PERSIST_CUSTOM_ID" value="true" />
+        <variable name="PERSIST_MODIFY_URL" value="true" />
+        <variable name="SHAKE_MENU" value="false" />
+        <variable name="AUTO_SPLASHSCREEN" value="false" />
+    </plugin>
+    <platform name="ios">
+        <preference name="SwiftVersion" value="5.0" />
+        <preference name="deployment-target" value="15.0" />
+    </platform>
 </widget>

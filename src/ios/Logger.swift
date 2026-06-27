@@ -1,4 +1,3 @@
-import Capacitor
 import Foundation
 import os.log
 import WebKit
@@ -132,40 +131,14 @@ public class Logger {
 
     public init(
         withTag tag: String,
-        config: InstanceConfiguration? = nil,
         options: Options? = nil
     ) {
         self.tag = tag
-        if let config = config {
-            // The logger plugin's name is LoggerBridge, we want to look at the config
-            // named "Logger", so we can't use plugin.getConfigValue().
-            if let configLevel = getConfigValue("level", from: config) as? String,
-               let logLevel = LogLevel[configLevel] {
-                level = logLevel
-            }
-
-            if let configLabels = getConfigValue("labels", from: config) as? [String: String] {
-                labels = configLabels
-            }
-
-            if let configSyslog = getConfigValue("useSyslog", from: config) as? Bool {
-                useSyslog = configSyslog
-            }
-        }
-
         if let options = options {
             self.level = options.level
             self.labels = options.labels
             self.useSyslog = options.useSyslog
         }
-    }
-
-    private func getConfigValue(_ configKey: String, from config: InstanceConfiguration) -> Any? {
-        if let config = config.pluginConfigurations as? JSObject {
-            return config[keyPath: KeyPath(stringLiteral: "Logger.\(configKey)")]
-        }
-
-        return nil
     }
 
     public func error(_ message: String) {

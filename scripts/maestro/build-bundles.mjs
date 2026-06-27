@@ -98,10 +98,21 @@ await runCommand('bun', ['run', 'build'], {
   cwd: repoRoot,
   env: process.env,
 });
-await runCommand('bun', ['install'], {
-  cwd: exampleAppDir,
-  env: process.env,
-});
+const exampleNodeModules = path.join(exampleAppDir, 'node_modules');
+try {
+  await runCommand('bun', ['install'], {
+    cwd: exampleAppDir,
+    env: process.env,
+  });
+} catch (error) {
+  console.warn(
+    `[maestro] bun install failed, retrying with npm ci: ${error instanceof Error ? error.message : String(error)}`,
+  );
+  await runCommand('npm', ['ci'], {
+    cwd: exampleAppDir,
+    env: process.env,
+  });
+}
 
 for (const scenario of selectedScenarios) {
   for (const release of scenario.releases) {

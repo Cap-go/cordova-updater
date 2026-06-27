@@ -16,6 +16,22 @@ declare const cordova: {
 
 export const SERVICE_NAME = 'Updater';
 
+/** Cordova resolves no-arg native success as `''` instead of `null`/`undefined`. */
+export function normalizeEmptyCordovaResult<T>(result: unknown): T | null {
+  if (result == null || result === '') {
+    return null;
+  }
+
+  if (typeof result === 'object' && !Array.isArray(result)) {
+    const record = result as Record<string, unknown>;
+    if (!('bundle' in record) && !('id' in record) && Object.keys(record).length === 0) {
+      return null;
+    }
+  }
+
+  return result as T;
+}
+
 export function exec<T = unknown>(action: string, args: unknown[] = []): Promise<T> {
   return new Promise((resolve, reject) => {
     cordova.exec(

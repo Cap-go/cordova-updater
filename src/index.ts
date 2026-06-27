@@ -1,4 +1,4 @@
-import { exec } from './exec';
+import { exec, normalizeEmptyCordovaResult } from './exec';
 export * from './definitions';
 
 export const Updater = {
@@ -38,8 +38,8 @@ export const Updater = {
   getPluginVersion: () => exec('getPluginVersion'),
   isAutoUpdateEnabled: () => exec('isAutoUpdateEnabled'),
   isAutoUpdateAvailable: () => exec('isAutoUpdateAvailable'),
-  getNextBundle: () => exec('getNextBundle'),
-  getFailedUpdate: () => exec('getFailedUpdate'),
+  getNextBundle: async () => normalizeEmptyCordovaResult(await exec('getNextBundle')),
+  getFailedUpdate: async () => normalizeEmptyCordovaResult(await exec('getFailedUpdate')),
   setShakeMenu: (options?: unknown) => exec('setShakeMenu', [options ?? {}]),
   isShakeMenuEnabled: () => exec('isShakeMenuEnabled'),
   setShakeChannelSelector: (options?: unknown) => exec('setShakeChannelSelector', [options ?? {}]),

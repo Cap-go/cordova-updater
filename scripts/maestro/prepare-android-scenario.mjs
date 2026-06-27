@@ -1,27 +1,16 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { runCommand } from './command.mjs';
-import { createBuildEnv, exampleAppDir, getScenario } from './scenarios.mjs';
-
-async function runCommandWithRetries(command, args, options, maxAttempts = 3) {
-  let attempt = 1;
-
-  while (attempt <= maxAttempts) {
-    try {
-      await runCommand(command, args, options);
-      return;
-    } catch (error) {
-      if (attempt === maxAttempts) {
-        throw error;
-      }
-
-      console.warn(
-        `[maestro] ${command} ${args.join(' ')} failed on attempt ${attempt}/${maxAttempts}: ${error.message}`,
-      );
-      console.warn('[maestro] Retrying after a short delay...');
-      await Bun.sleep(attempt * 5000);
-      attempt += 1;
-    }
-  }
-}
+import {
+  buildPluginVariableArgs,
+  createScenarioEnv,
+  ensurePluginDistBuilt,
+  installLocalPluginSymlink,
+  prepareExampleWebAssets,
+  runCommandWithRetries,
+  stripUpdaterPluginFromCordovaMetadata,
+} from './prepare-cordova-scenario-shared.mjs';
+import { exampleAppDir, getScenario, repoRoot } from './scenarios.mjs';
 
 const scenarioId = process.argv[2];
 
@@ -30,29 +19,56 @@ if (!scenarioId) {
 }
 
 const scenario = getScenario(scenarioId);
+const env = createScenarioEnv(scenario);
 
-const env = {
-  ...createBuildEnv({
-    scenarioId: scenario.id,
-    directUpdate: scenario.directUpdate,
-    appLabel: scenario.builtinLabel,
-    autoUpdate: scenario.autoUpdate,
-    extraEnv: scenario.env ?? {},
-  }),
-  CAPGO_DIRECT_UPDATE: scenario.directUpdate,
-};
+await prepareExampleWebAssets(exampleAppDir, repoRoot, env);
 
-await runCommand('bun', ['run', 'build'], {
+const platformsDir = path.join(exampleAppDir, 'platforms');
+const androidPlatformDir = path.join(platformsDir, 'android');
+const iosPlatformDir = path.join(platformsDir, 'ios');
+if (fs.existsSync(androidPlatformDir)) {
+  fs.rmSync(androidPlatformDir, { recursive: true, force: true });
+}
+if (fs.existsSync(iosPlatformDir)) {
+  fs.rmSync(iosPlatformDir, { recursive: true, force: true });
+}
+
+await stripUpdaterPluginFromCordovaMetadata(exampleAppDir);
+
+await runCommand('npx', ['cordova', 'platform', 'add', 'android', '--nosave'], {
   cwd: exampleAppDir,
   env,
 });
 
-await runCommand('bunx', ['cap', 'sync', 'android'], {
+await ensurePluginDistBuilt(repoRoot, env);
+installLocalPluginSymlink(exampleAppDir, repoRoot);
+
+const pluginDir = path.join(exampleAppDir, 'plugins', '@capgo', 'cordova-updater');
+const pluginVariableArgs = buildPluginVariableArgs(env);
+await runCommand(
+  'npx',
+  ['cordova', 'plugin', 'add', pluginDir, '--link', '--nosave', ...pluginVariableArgs],
+  {
+    cwd: exampleAppDir,
+    env,
+  },
+);
+
+await runCommand('npx', ['cordova', 'prepare', 'android'], {
   cwd: exampleAppDir,
   env,
 });
 
-await runCommandWithRetries('./gradlew', ['assembleDebug'], {
-  cwd: `${exampleAppDir}/android`,
+const nativeConfigPath = path.join(exampleAppDir, 'platforms', 'android', 'app', 'src', 'main', 'res', 'xml', 'config.xml');
+const nativePluginSource = path.join(exampleAppDir, 'platforms', 'android', 'app', 'src', 'main', 'java', 'CordovaUpdaterPlugin.java');
+if (
+  !fs.existsSync(nativePluginSource) ||
+  !fs.readFileSync(nativeConfigPath, 'utf8').includes('CordovaUpdaterPlugin')
+) {
+  throw new Error('CordovaUpdaterPlugin was not installed into the Android platform project');
+}
+
+await runCommandWithRetries('npx', ['cordova', 'build', 'android'], {
+  cwd: exampleAppDir,
   env,
 });
