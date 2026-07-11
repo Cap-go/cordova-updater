@@ -61,7 +61,8 @@
     "check:wiring": "node scripts/check-cordova-plugin-wiring.mjs",
     "native:contract:ios": "./scripts/test-ios.sh -only-testing:CordovaUpdaterPluginTests/NativeContractTests",
     "native:test:ios": "./scripts/test-ios.sh",
-    "test:ios": "./scripts/test-ios.sh"
+    "test:ios": "./scripts/test-ios.sh",
+    "changelog:ai": "node scripts/generate-ai-changelog.mjs"
   },
   "devDependencies": {
     "@ionic/eslint-config": "^0.4.0",
