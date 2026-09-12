@@ -363,9 +363,8 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
         if !previewSessionEnabled,
            !defaultChannelCleanupMustRetry,
-           self.hasPendingDefaultChannelPreviewSnapshot(),
-           !self.restorePreviewPreviousDefaultChannel() {
-            logger.warn("Default channel preview restore remains pending")
+           self.hasPendingDefaultChannelPreviewSnapshot() {
+            self.restorePreviewPreviousDefaultChannel()
         }
 
         let configDefaultChannel = readConfigString("defaultChannel", "")!

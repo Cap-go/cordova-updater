@@ -946,7 +946,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                 },
                 logger
             );
-            this.appLifecycleObserver.register();
+            this.appLifecycleObserver.register(this.getContext());
             logger.info("Using ProcessLifecycleOwner for foreground/background detection (Android 14+)");
         } else {
             logger.info("Using activity lifecycle callbacks for foreground/background detection (Android <14)");
