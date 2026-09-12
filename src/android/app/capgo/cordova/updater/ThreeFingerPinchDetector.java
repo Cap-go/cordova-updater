@@ -17,6 +17,7 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
+import android.app.Activity;
 import java.lang.ref.WeakReference;
 import java.util.List;
 
@@ -46,7 +47,7 @@ public class ThreeFingerPinchDetector {
         this.logger = logger;
     }
 
-    public void start(BridgeActivity activity) {
+    public void start(Activity activity) {
         if (targetWindow != null) {
             stop();
         }
