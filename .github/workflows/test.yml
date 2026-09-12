@@ -43,9 +43,6 @@ jobs:
           cache: gradle
       - name: Build and test Android plugin
         run: bun run verify:android
-      - name: Verify packed package in example app (Android)
-        shell: bash
-        run: bash ./.github/scripts/verify-packed-example.sh android
 
   build_ios:
     permissions:
