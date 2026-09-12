@@ -1,4 +1,3 @@
-import Capacitor
 import Foundation
 import WebKit
 

@@ -4,7 +4,6 @@ import android.util.ArrayMap;
 import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import com.getcapacitor.*;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
@@ -13,8 +12,6 @@ import java.util.Map;
 import org.jetbrains.annotations.Contract;
 
 public class Logger {
-
-    private Bridge bridge;
 
     public enum LogLevel {
         silent,
@@ -79,10 +76,6 @@ public class Logger {
     private final ArrayMap<String, Long> timers = new ArrayMap<>();
     private final String kDefaultTimerLabel = "default";
     private boolean useSystemLog;
-
-    public void setBridge(Bridge bridge) {
-        this.bridge = bridge;
-    }
 
     public Logger(String tag) {
         super();
@@ -246,14 +239,6 @@ public class Logger {
                     Log.d(tag, formattedMessage);
                     break;
             }
-        }
-
-        // Send to JavaScript if webView is available
-        if (bridge != null && bridge.getWebView() != null) {
-            bridge.eval(
-                "console." + level.name() + "(\"[" + tag.replace("\"", "\\\"") + "] " + formattedMessage.replace("\"", "\\\"") + "\")",
-                null
-            );
         }
     }
 

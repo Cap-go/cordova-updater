@@ -39,7 +39,7 @@ cp -R example-app/. "$test_app/"
 cd "$test_app"
 bun remove "$plugin_name"
 bun add "${packed_packages[0]}"
-bun run build
+CAPGO_USE_PACKED_PLUGIN=1 bun run build
 
 case "$platform" in
   android)
