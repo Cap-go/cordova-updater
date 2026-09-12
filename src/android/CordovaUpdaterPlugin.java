@@ -129,6 +129,8 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     private static final String STATS_URL_PREF_KEY = "CapacitorUpdater.statsUrl";
     private static final String CHANNEL_URL_PREF_KEY = "CapacitorUpdater.channelUrl";
     private static final String DEFAULT_CHANNEL_PREF_KEY = "CapacitorUpdater.defaultChannel";
+    private static final String DEFAULT_CHANNEL_INSTALL_MARKER_PREF_KEY = "CapacitorUpdater.defaultChannelInstallMarkerCreated";
+    private static final String DEFAULT_CHANNEL_INSTALL_MARKER_FILE = "CapacitorUpdater.defaultChannelInstallMarker";
     private static final String PREVIEW_SESSION_PREF_KEY = "CapacitorUpdater.previewSession";
     private static final String PREVIEW_PREVIOUS_SHAKE_MENU_PREF_KEY = "CapacitorUpdater.previewPreviousShakeMenu";
     private static final String PREVIEW_PREVIOUS_SHAKE_CHANNEL_SELECTOR_PREF_KEY = "CapacitorUpdater.previewPreviousShakeChannelSelector";
@@ -169,7 +171,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     static final int APPLICATION_EXIT_REASON_USER_REQUESTED = 10;
     static final int APPLICATION_EXIT_REASON_DEPENDENCY_DIED = 12;
 
-    private final String pluginVersion = "8.49.5";
+    private final String pluginVersion = "8.51.15";
     private static final String DELAY_CONDITION_PREFERENCES = "";
 
     private SharedPreferences.Editor editor;
@@ -179,6 +181,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     protected CapgoUpdater implementation;
     private Boolean persistCustomId = false;
     private Boolean persistModifyUrl = false;
+    private Boolean persistDefaultChannelOnReinstall = true;
 
     private Integer appReadyTimeout = 10000;
     private Integer periodCheckDelay = 0;
@@ -257,6 +260,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     private final Object cleanupLock = new Object();
     private volatile boolean cleanupComplete = false;
     private volatile Thread cleanupThread = null;
+    private volatile boolean defaultChannelCleanupMustRetry = false;
 
     private int lastNotifiedStatPercent = 0;
 
@@ -764,6 +768,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
 
         this.persistCustomId = this.updaterConfig.getBoolean("persistCustomId", false);
         this.persistModifyUrl = this.updaterConfig.getBoolean("persistModifyUrl", false);
+        this.persistDefaultChannelOnReinstall = this.updaterConfig.getBoolean("persistDefaultChannelOnReinstall", true);
         this.allowSetDefaultChannel = this.updaterConfig.getBoolean("allowSetDefaultChannel", true);
         this.implementation.setPublicKey(this.updaterConfig.getString("publicKey", ""));
         // Log public key prefix if encryption is enabled
@@ -788,6 +793,34 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                     logger.info("Loaded persisted channelUrl");
                 }
             }
+        }
+
+        final boolean resetWhenUpdate = this.updaterConfig.getBoolean("resetWhenUpdate", true);
+        final boolean nativeBuildVersionChanged = this.hasNativeBuildVersionChanged();
+        final boolean defaultChannelPersistenceDisabled = !Boolean.TRUE.equals(this.persistDefaultChannelOnReinstall);
+        final boolean restoredReinstall = defaultChannelPersistenceDisabled && this.isRestoredReinstall();
+        boolean installMarkerCanBePrepared = true;
+        if (
+            shouldClearPersistedDefaultChannel(
+                Boolean.TRUE.equals(this.persistDefaultChannelOnReinstall),
+                resetWhenUpdate,
+                nativeBuildVersionChanged,
+                restoredReinstall
+            )
+        ) {
+            installMarkerCanBePrepared = clearPersistedDefaultChannel(this.editor);
+            if (installMarkerCanBePrepared) {
+                logger.info("Cleared persisted defaultChannel because reinstall persistence is disabled");
+            } else {
+                logger.warn("Cannot durably clear persisted defaultChannel");
+                this.defaultChannelCleanupMustRetry = true;
+                if (!invalidateDefaultChannelInstallMarker(this.defaultChannelInstallMarker())) {
+                    logger.warn("Cannot invalidate default channel install marker for cleanup retry");
+                }
+            }
+        }
+        if (defaultChannelPersistenceDisabled && installMarkerCanBePrepared) {
+            this.prepareDefaultChannelInstallMarker();
         }
 
         // Load defaultChannel: first try from persistent storage (set via setChannel), then fall back to config
@@ -868,11 +901,8 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                 ? this.prefs.getBoolean(PREVIEW_PREVIOUS_SHAKE_CHANNEL_SELECTOR_PREF_KEY, false)
                 : this.shakeChannelSelectorEnabled;
         }
-        boolean resetWhenUpdate = this.updaterConfig.getBoolean("resetWhenUpdate", true);
-
         // Check if app was recently installed/updated BEFORE cleanupObsoleteVersions updates LatestVersionNative
         this.wasRecentlyInstalledOrUpdated = this.checkIfRecentlyInstalledOrUpdated();
-        final boolean nativeBuildVersionChanged = this.hasNativeBuildVersionChanged();
 
         this.implementation.autoReset(this.currentBuildVersion, resetWhenUpdate);
         if (nativeBuildVersionChanged) {
@@ -2118,8 +2148,80 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     }
 
     void persistCurrentNativeBuildVersion() {
+        if (this.defaultChannelCleanupMustRetry) {
+            logger.warn("Keeping the previous native build version so default channel cleanup retries");
+            return;
+        }
         this.editor.putString("LatestNativeBuildVersion", this.currentBuildVersion);
         this.editor.apply();
+    }
+
+    static boolean shouldClearPersistedDefaultChannel(
+        final boolean persistDefaultChannelOnReinstall,
+        final boolean resetWhenUpdate,
+        final boolean nativeBuildVersionChanged,
+        final boolean restoredReinstall
+    ) {
+        return !persistDefaultChannelOnReinstall && (restoredReinstall || (resetWhenUpdate && nativeBuildVersionChanged));
+    }
+
+    static boolean clearPersistedDefaultChannel(final SharedPreferences.Editor editor) {
+        editor.remove(DEFAULT_CHANNEL_PREF_KEY);
+        editor.remove(PREVIEW_PREVIOUS_DEFAULT_CHANNEL_PREF_KEY);
+        editor.remove(PREVIEW_PREVIOUS_DEFAULT_CHANNEL_WAS_SET_PREF_KEY);
+        return editor.commit();
+    }
+
+    private File defaultChannelInstallMarker() {
+        return new File(this.getContext().getNoBackupFilesDir(), DEFAULT_CHANNEL_INSTALL_MARKER_FILE);
+    }
+
+    static boolean invalidateDefaultChannelInstallMarker(final File marker) {
+        return !marker.exists() || marker.delete();
+    }
+
+    private boolean isRestoredReinstall() {
+        return isRestoredReinstall(
+            this.defaultChannelInstallMarker(),
+            this.prefs.getBoolean(DEFAULT_CHANNEL_INSTALL_MARKER_PREF_KEY, false)
+        );
+    }
+
+    static boolean isRestoredReinstall(final File marker, final boolean markerWasCreated) {
+        return markerWasCreated && !marker.exists();
+    }
+
+    private void prepareDefaultChannelInstallMarker() {
+        prepareDefaultChannelInstallMarker(
+            this.defaultChannelInstallMarker(),
+            this.prefs.getBoolean(DEFAULT_CHANNEL_INSTALL_MARKER_PREF_KEY, false),
+            this.editor,
+            this.logger
+        );
+    }
+
+    static void prepareDefaultChannelInstallMarker(
+        final File marker,
+        final boolean markerWasCreated,
+        final SharedPreferences.Editor editor,
+        final Logger logger
+    ) {
+        if (!marker.exists()) {
+            try {
+                if (!marker.createNewFile() && !marker.exists()) {
+                    throw new IOException("Marker file was not created");
+                }
+            } catch (final IOException e) {
+                logger.warn("Cannot create default channel install marker: " + e.getMessage());
+                editor.remove(DEFAULT_CHANNEL_INSTALL_MARKER_PREF_KEY);
+                editor.commit();
+                return;
+            }
+        }
+        if (!markerWasCreated) {
+            editor.putBoolean(DEFAULT_CHANNEL_INSTALL_MARKER_PREF_KEY, true);
+            editor.apply();
+        }
     }
 
     private void waitForCleanupIfNeeded() {

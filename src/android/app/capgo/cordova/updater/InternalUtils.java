@@ -3,7 +3,6 @@ package app.capgo.cordova.updater;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
-import app.capgo.cordova.updater.compat.JSObject;
 import org.json.JSONObject;
 import java.util.Map;
 
@@ -12,18 +11,10 @@ public class InternalUtils {
     /**
      * Converts a Map to JSONObject for proper bridge serialization.
      */
-    public static JSObject mapToJSObject(Map<String, Object> map) {
-        JSObject jsObject = new JSObject();
-        for (Map.Entry<String, Object> entry : map.entrySet()) {
-            jsObject.put(entry.getKey(), entry.getValue());
-        }
-        return jsObject;
-    }
-
     public static JSONObject mapToJSONObject(Map<String, Object> map) {
         JSONObject jsObject = new JSONObject();
         for (Map.Entry<String, Object> entry : map.entrySet()) {
-            try { jsObject.put(entry.getKey(), entry.getValue()); } catch (org.json.JSONException ignored) {}
+            jsObject.put(entry.getKey(), entry.getValue());
         }
         return jsObject;
     }
@@ -31,7 +22,7 @@ public class InternalUtils {
     public static String getPackageName(PackageManager pm, String packageName) {
         try {
             PackageInfo pInfo = getPackageInfoInternal(pm, packageName);
-            return (pInfo != null) ? pInfo.packageName : null;
+            return pInfo != null ? pInfo.packageName : null;
         } catch (PackageManager.NameNotFoundException e) {
             // Exception is handled internally, and null is returned to indicate the package name could not be retrieved
             return null;

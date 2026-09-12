@@ -43,26 +43,28 @@ bun run build
 
 case "$platform" in
   android)
-    if [[ ! -d android ]]; then
-      bunx cap add android
+    if [[ ! -d platforms/android ]]; then
+      bunx cordova platform add android
     fi
-    bunx cap sync android
-    cd android
-    ./gradlew build test
+    bunx cordova prepare android
+    cd platforms/android
+    ./gradlew assembleDebug
     ;;
   ios)
-    if [[ ! -d ios ]]; then
-      bunx cap add ios
+    if [[ ! -d platforms/ios ]]; then
+      bunx cordova platform add ios
     fi
-    bunx cap sync ios
-    rm -rf "$HOME/Library/Caches/org.swift.swiftpm/artifacts"/https___github_com_ionic_team_capacitor_swift_pm_releases_download_*
+    bunx cordova prepare ios
+    (cd platforms/ios && pod install --repo-update)
     xcodebuild \
-      -project ios/App/App.xcodeproj \
-      -scheme App \
-      -destination generic/platform=iOS \
-      -clonedSourcePackagesDirPath "$tmp_root/plugin-example-swiftpm" \
+      -workspace "platforms/ios/Updater Example.xcworkspace" \
+      -scheme "Updater Example" \
+      -configuration Debug \
+      -destination "generic/platform=iOS Simulator" \
       -derivedDataPath "$tmp_root/plugin-example-derived-data" \
-      CODE_SIGNING_ALLOWED=NO
+      CODE_SIGNING_ALLOWED=NO \
+      SWIFT_VERSION=5.0 \
+      IPHONEOS_DEPLOYMENT_TARGET=15.0
     ;;
   web)
     ;;

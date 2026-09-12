@@ -10,12 +10,10 @@ on:
       - "*"
 
 jobs:
-  # Tests already passed before tag was created, so just build and deploy
   deploy:
-    # Keep this job capped at 10 minutes; never raise it unless explicitly asked.
-    timeout-minutes: 10
     runs-on: ubuntu-latest
-    name: "Build code and npm release"
+    timeout-minutes: 10
+    name: "Build and publish to npm"
     permissions:
       contents: write
       id-token: write
@@ -27,12 +25,10 @@ jobs:
           filter: blob:none
       - uses: oven-sh/setup-bun@v2
       - name: Install dependencies
-        id: install_code
         run: bun i
       - name: Check plugin wiring
         run: bun run check:wiring
       - name: Build
-        id: build_code
         run: bun run build
       - name: Generate AI changelog
         id: changelog
@@ -46,24 +42,35 @@ jobs:
         with:
           node-version: 24.x
           registry-url: 'https://registry.npmjs.org'
-      - name: Publish lts-v6 to npm
-        if: ${{ startsWith(github.ref, 'refs/tags/6.') }}
+      - name: Install npm CLI for staged publishing
+        run: npm install -g npm@^11.15.0
+      - name: Stage publish to npm
+        if: ${{ !contains(github.ref, '-alpha.') }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --tag lts-v6 --provenance --access public
-      - name: Publish to npm
-        if: ${{ !contains(github.ref, '-alpha.') && !startsWith(github.ref, 'refs/tags/6.') }}
+        run: |
+          npm --version
+          npm stage publish --provenance --access public --ignore-scripts
+      - name: Stage publish to npm with next tag
+        if: ${{ contains(github.ref, '-alpha.') }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --tag latest --provenance --access public
-      - name: Publish to npm with next tag
-        if: ${{ contains(github.ref, '-alpha.') && !startsWith(github.ref, 'refs/tags/6.')  }}
+        run: |
+          npm --version
+          npm stage publish --tag next --provenance --access public --ignore-scripts
+      - name: Request stage approval
+        continue-on-error: true
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --tag next --provenance --access public
+          GH_TOKEN: ${{ secrets.NPM_STAGE_DISPATCH_TOKEN }}
+        run: |
+          gh api --method POST repos/Cap-go/automations/dispatches \
+            -f event_type=npm-stage-approve \
+            -f "client_payload[repository]=${GITHUB_REPOSITORY}" \
+            -f "client_payload[run_id]=${GITHUB_RUN_ID}" \
+            -f "client_payload[package]=$(node -p "require('./package.json').name")"
       - name: Create GitHub release
         id: create_release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         with:
           body: |
             ## 🆕 Changelog

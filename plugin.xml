@@ -51,6 +51,7 @@
     <preference name="DISABLE_JS_LOGGING" default="false"/>
     <preference name="PERSIST_CUSTOM_ID" default="false"/>
     <preference name="PERSIST_MODIFY_URL" default="false"/>
+    <preference name="PERSIST_DEFAULT_CHANNEL_ON_REINSTALL" default="true"/>
 
     <platform name="android">
         <config-file target="res/xml/config.xml" parent="/*">
@@ -98,6 +99,7 @@
             <string name="capgo_updater_disable_js_logging">$DISABLE_JS_LOGGING</string>
             <string name="capgo_updater_persist_custom_id">$PERSIST_CUSTOM_ID</string>
             <string name="capgo_updater_persist_modify_url">$PERSIST_MODIFY_URL</string>
+            <string name="capgo_updater_persist_default_channel_on_reinstall">$PERSIST_DEFAULT_CHANNEL_ON_REINSTALL</string>
         </config-file>
 
         <framework src="src/android/capgo-cordova-updater.gradle" custom="true" type="gradleReference"/>
@@ -168,11 +170,12 @@
         <config-file target="*-Info.plist" parent="CapgoUpdaterDisableJsLogging"><string>$DISABLE_JS_LOGGING</string></config-file>
         <config-file target="*-Info.plist" parent="CapgoUpdaterPersistCustomId"><string>$PERSIST_CUSTOM_ID</string></config-file>
         <config-file target="*-Info.plist" parent="CapgoUpdaterPersistModifyUrl"><string>$PERSIST_MODIFY_URL</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterPersistDefaultChannelOnReinstall"><string>$PERSIST_DEFAULT_CHANNEL_ON_REINSTALL</string></config-file>
 
 
         <source-file src="src/ios/AES.swift"/>
         <source-file src="src/ios/AppHealthTracker.swift"/>
-        <source-file src="src/ios/BigInt.swift"/>
+        <source-file src="src/ios/CapgoRawRsa.swift"/>
         <source-file src="src/ios/BundleInfo.swift"/>
         <source-file src="src/ios/BundleStatus.swift"/>
         <source-file src="src/ios/CapgoUpdater.swift"/>
@@ -198,7 +201,6 @@
                 <pod name="Alamofire" spec="~> 5.11.0" />
                 <pod name="ZIPFoundation" spec="~> 0.9.20" />
                 <pod name="Version" spec="0.8.0" />
-                <pod name="BigInt" spec="~> 5.2.0" />
             </pods>
         </podspec>
     </platform>
