@@ -42,6 +42,16 @@ bun add "${packed_packages[0]}"
 CAPGO_USE_PACKED_PLUGIN=1 bun run build
 
 plugin_path="$(node -p "require('path').dirname(require.resolve('@capgo/cordova-updater/package.json'))")"
+plugin_spec="file:${plugin_path}"
+# Cordova platform add resolves plugin sources from package.json. Rewrite the packed
+# tarball dependency to the installed node_modules path so npm view is not called on .tgz.
+node -e "
+const fs = require('fs');
+const [pluginName, pluginSpec] = process.argv.slice(1);
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+pkg.devDependencies[pluginName] = pluginSpec;
+fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+" "$plugin_name" "$plugin_spec"
 # Use %ENV so Perl does not treat @capgo in scoped package paths as an array.
 PLUGIN_PATH="$plugin_path" perl -pi -e 's|spec="\.\."|spec="$ENV{PLUGIN_PATH}"|' config.xml
 
