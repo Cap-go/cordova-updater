@@ -41,10 +41,10 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
       - name: Create version bump main
         if: github.ref == 'refs/heads/main'
-        run: bunx capacitor-plugin-standard-version@latest --skip.changelog
+        run: node scripts/cordova-plugin-standard-version.mjs --skip.changelog
       - name: Create version bump development
         if: github.ref == 'refs/heads/development'
-        run: bunx capacitor-plugin-standard-version@latest --prerelease alpha --skip.changelog
+        run: node scripts/cordova-plugin-standard-version.mjs --prerelease alpha --skip.changelog
       - name: Push to origin
         run: |
           CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
