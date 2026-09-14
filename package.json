@@ -62,6 +62,7 @@
     "test": "bun run test:android && bun run test:ios",
     "test:android": "cd android && ./gradlew test && cd ..",
     "check:wiring": "node scripts/check-cordova-plugin-wiring.mjs",
+    "check:cap9-deprecated": "node scripts/check-cap9-deprecated.mjs",
     "native:contract:ios": "./scripts/test-ios.sh -only-testing:CordovaUpdaterPluginTests/NativeContractTests",
     "native:test:ios": "./scripts/test-ios.sh",
     "test:ios": "./scripts/test-ios.sh",
