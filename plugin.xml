@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
         id="@capgo/cordova-updater"
-        version="8.0.0">
+        version="8.1.0">
 
     <name>Updater</name>
     <description>Cordova plugin for Capgo live updates (OTA).</description>
