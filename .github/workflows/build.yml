@@ -10,29 +10,25 @@ on:
       - "*"
 
 jobs:
-  # Tests already passed before tag was created, so just build and deploy
   deploy:
-    # Keep this job capped at 10 minutes; never raise it unless explicitly asked.
-    timeout-minutes: 10
     runs-on: ubuntu-latest
-    name: "Build code and npm release"
+    timeout-minutes: 10
+    name: "Build and publish to npm"
     permissions:
       contents: write
       id-token: write
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           fetch-depth: 0
           filter: blob:none
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
       - name: Install dependencies
-        id: install_code
         run: bun i
       - name: Check plugin wiring
         run: bun run check:wiring
       - name: Build
-        id: build_code
         run: bun run build
       - name: Generate AI changelog
         id: changelog
@@ -42,28 +38,61 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: bun run changelog:ai
       - name: Setup Node.js for npm publish
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: 24.x
           registry-url: 'https://registry.npmjs.org'
-      - name: Publish lts-v6 to npm
-        if: ${{ startsWith(github.ref, 'refs/tags/6.') }}
+      - name: Install npm CLI for staged publishing
+        run: npm install -g npm@11.19.1
+      - name: Check if package exists on npm
+        id: npm_exists
+        run: |
+          if npm view "$(node -p "require('./package.json').name")" version >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Bootstrap publish to npm (first release)
+        if: steps.npm_exists.outputs.exists == 'false' && !contains(github.ref, '-alpha.')
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --tag lts-v6 --provenance --access public
-      - name: Publish to npm
-        if: ${{ !contains(github.ref, '-alpha.') && !startsWith(github.ref, 'refs/tags/6.') }}
+        run: |
+          npm --version
+          npm publish --provenance --access public --ignore-scripts
+      - name: Bootstrap publish to npm with next tag (first release)
+        if: steps.npm_exists.outputs.exists == 'false' && contains(github.ref, '-alpha.')
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --tag latest --provenance --access public
-      - name: Publish to npm with next tag
-        if: ${{ contains(github.ref, '-alpha.') && !startsWith(github.ref, 'refs/tags/6.')  }}
+        run: |
+          npm --version
+          npm publish --tag next --provenance --access public --ignore-scripts
+      - name: Stage publish to npm
+        if: steps.npm_exists.outputs.exists == 'true' && !contains(github.ref, '-alpha.')
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --tag next --provenance --access public
+        run: |
+          npm --version
+          npm stage publish --provenance --access public --ignore-scripts
+      - name: Stage publish to npm with next tag
+        if: steps.npm_exists.outputs.exists == 'true' && contains(github.ref, '-alpha.')
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm --version
+          npm stage publish --tag next --provenance --access public --ignore-scripts
+      - name: Request stage approval
+        id: stage_approval
+        env:
+          GH_TOKEN: ${{ secrets.NPM_STAGE_DISPATCH_TOKEN }}
+        run: |
+          gh api --method POST repos/Cap-go/automations/dispatches \
+            -f event_type=npm-stage-approve \
+            -f "client_payload[repository]=${GITHUB_REPOSITORY}" \
+            -f "client_payload[run_id]=${GITHUB_RUN_ID}" \
+            -f "client_payload[package]=$(node -p "require('./package.json').name")"
       - name: Create GitHub release
         id: create_release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           body: |
             ## 🆕 Changelog

@@ -343,6 +343,23 @@ export interface CordovaUpdaterConfig {
       allowSetDefaultChannel?: boolean;
 
       /**
+       * Keep the default channel stored by {@link UpdaterPlugin.setChannel} or refreshed by
+       * {@link UpdaterPlugin.getChannel} when app data is restored into a new app install.
+       *
+       * `setChannel()` and a successful `getChannel()` still persist the selected channel across app
+       * restarts. When this option is `false`, native startup clears that persisted channel when it
+       * detects app data restored into a new installation. Native build cleanup clears the persisted
+       * channel only when `persistDefaultChannelOnReinstall` is `false`, `resetWhenUpdate` is `true`,
+       * and the native build version has changed.
+       *
+       * Only available for Android and iOS.
+       *
+       * @default true
+       * @since 8.51.0
+       */
+      persistDefaultChannelOnReinstall?: boolean;
+
+      /**
        * Set the default channel for the app in the config. Case sensitive.
        * This will setting will override the default channel set in the cloud, but will still respect overrides made in the cloud.
        * This requires the channel to allow devices to self dissociate/associate in the channel settings. https://capgo.app/docs/public-api/channels/#channel-configuration-options

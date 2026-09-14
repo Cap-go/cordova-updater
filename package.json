@@ -13,6 +13,9 @@
     "src/ios/",
     "plugin.xml"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "author": "Martin Donadieu <martin@capgo.app>",
   "repository": {
     "type": "git",
