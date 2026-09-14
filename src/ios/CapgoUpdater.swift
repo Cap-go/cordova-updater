@@ -75,17 +75,18 @@ import UIKit
     private var statsInFlight: [QueuedStatsEvent] = []
     private let statsQueueLock = NSLock()
     private let statsPersistLock = NSLock()
+    private let statsStateLock = NSLock()
     private var statsFlushTimer: Timer?
     private var _statsStopped = false
     private var statsStopped: Bool {
         get {
-            statsPersistLock.lock()
-            defer { statsPersistLock.unlock() }
+            statsStateLock.lock()
+            defer { statsStateLock.unlock() }
             return _statsStopped
         }
         set {
-            statsPersistLock.lock()
-            defer { statsPersistLock.unlock() }
+            statsStateLock.lock()
+            defer { statsStateLock.unlock() }
             _statsStopped = newValue
         }
     }

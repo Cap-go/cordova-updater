@@ -2099,13 +2099,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                                 logger.error("Failed to delete: " + bundle.getId() + " " + e.getMessage());
                             }
                         }
-                        final List<BundleInfo> storedBundles = this.implementation.list(true);
-                        final Set<String> allowedIds = new HashSet<>();
-                        for (final BundleInfo info : storedBundles) {
-                            if (info != null && info.getId() != null && !info.getId().isEmpty()) {
-                                allowedIds.add(info.getId());
-                            }
-                        }
+                        final Set<String> allowedIds = this.implementation.allowedBundleIdsForCleanup();
                         this.implementation.cleanupDownloadDirectories(allowedIds, Thread.currentThread());
                         this.implementation.cleanupOrphanedTempFolders(Thread.currentThread());
 
@@ -2116,8 +2110,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                         }
                         this.implementation.cleanupDeltaCache(Thread.currentThread());
                     }
-                    this.editor.putString("LatestNativeBuildVersion", this.currentBuildVersion);
-                    this.editor.apply();
+                    this.persistCurrentNativeBuildVersion();
                 } catch (Exception e) {
                     logger.error("Error during cleanupObsoleteVersions: " + e.getMessage());
                 } finally {
