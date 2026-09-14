@@ -42,7 +42,8 @@ bun add "${packed_packages[0]}"
 CAPGO_USE_PACKED_PLUGIN=1 bun run build
 
 plugin_path="$(node -p "require('path').dirname(require.resolve('@capgo/cordova-updater/package.json'))")"
-perl -pi -e 's|spec="\.\."|spec="'"$plugin_path"'"|' config.xml
+# Use %ENV so Perl does not treat @capgo in scoped package paths as an array.
+PLUGIN_PATH="$plugin_path" perl -pi -e 's|spec="\.\."|spec="$ENV{PLUGIN_PATH}"|' config.xml
 
 case "$platform" in
   android)

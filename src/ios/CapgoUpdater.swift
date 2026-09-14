@@ -76,7 +76,19 @@ import UIKit
     private let statsQueueLock = NSLock()
     private let statsPersistLock = NSLock()
     private var statsFlushTimer: Timer?
-    private var statsStopped = false
+    private var _statsStopped = false
+    private var statsStopped: Bool {
+        get {
+            statsPersistLock.lock()
+            defer { statsPersistLock.unlock() }
+            return _statsStopped
+        }
+        set {
+            statsPersistLock.lock()
+            defer { statsPersistLock.unlock() }
+            _statsStopped = newValue
+        }
+    }
     private static let statsFlushInterval: TimeInterval = 1.0
     private static let maxPendingStats = 200
     private let pendingStatsFileName = "capgo_pending_stats.json"
@@ -405,9 +417,7 @@ import UIKit
     }
 
     public func shutdown() {
-        statsPersistLock.lock()
         statsStopped = true
-        statsPersistLock.unlock()
         statsFlushTimer?.invalidate()
         statsFlushTimer = nil
         persistStatsQueue(force: true)

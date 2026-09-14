@@ -270,26 +270,13 @@ public class DownloadService extends Worker {
                     outStream.write(buffer, 0, length);
                 }
             }
-            if (!expectedHash.equalsIgnoreCase(sha256Hex(digest))) {
+            if (!expectedHash.equalsIgnoreCase(CryptoCipher.digestToHex(digest))) {
                 return false;
             }
             return replaceFile(tempFile, dest);
         } finally {
             deleteQuietly(tempFile);
         }
-    }
-
-    private static String sha256Hex(final MessageDigest digest) {
-        final byte[] hash = digest.digest();
-        final StringBuilder hexString = new StringBuilder(hash.length * 2);
-        for (final byte b : hash) {
-            final String hex = Integer.toHexString(0xff & b);
-            if (hex.length() == 1) {
-                hexString.append('0');
-            }
-            hexString.append(hex);
-        }
-        return hexString.toString();
     }
 
     private static void deleteQuietly(final File file) {
@@ -912,7 +899,18 @@ public class DownloadService extends Worker {
                         throw new IOException("Response body is null");
                     }
                     try {
-                        writeHttpBody(partial, responseBody.byteStream(), code, existing);
+                        long resumeFrom = existing;
+                        if (code == HttpURLConnection.HTTP_PARTIAL && existing > 0) {
+                            String contentRange = response.header("Content-Range");
+                            if (contentRange == null || !contentRange.startsWith("bytes " + existing + "-")) {
+                                logger.debug("Unexpected Content-Range, restarting download of " + partial.getName());
+                                resumeFrom = 0;
+                                if (partial.exists() && !partial.delete()) {
+                                    logger.debug("Failed to delete partial before restart " + partial.getName());
+                                }
+                            }
+                        }
+                        writeHttpBody(partial, responseBody.byteStream(), code, resumeFrom);
                         keepPartial = true;
                     } catch (Exception e) {
                         keepPartial = true;
@@ -956,7 +954,6 @@ public class DownloadService extends Worker {
                 throw e;
             }
 
-            CryptoCipher.logChecksumInfo("Calculated checksum", expectedHash);
             CryptoCipher.logChecksumInfo("Expected checksum", expectedHash);
 
             if (cacheFile != null) {

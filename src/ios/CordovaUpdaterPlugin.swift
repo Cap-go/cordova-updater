@@ -363,8 +363,9 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
         if !previewSessionEnabled,
            !defaultChannelCleanupMustRetry,
-           self.hasPendingDefaultChannelPreviewSnapshot() {
-            self.restorePreviewPreviousDefaultChannel()
+           self.hasPendingDefaultChannelPreviewSnapshot(),
+           !self.restorePendingDefaultChannelPreviewSnapshot() {
+            logger.warn("Default channel preview restore remains pending")
         }
 
         let configDefaultChannel = readConfigString("defaultChannel", "")!
@@ -757,6 +758,33 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             return true
         case .missing, .invalidated:
             return false
+        }
+    }
+
+    @discardableResult
+    private func restorePendingDefaultChannelPreviewSnapshot() -> Bool {
+        guard let snapshotFile = self.defaultChannelPreviewSnapshotFile() else {
+            return false
+        }
+        switch self.defaultChannelPreviewSnapshot(file: snapshotFile) {
+        case .missing, .invalidated:
+            return true
+        case .unreadable:
+            return false
+        case .snapshot(let channel):
+            self.reconcileDefaultChannelDefaults(with: channel)
+            guard let stateFile = self.defaultChannelStateFile() else {
+                return false
+            }
+            do {
+                try self.persistDefaultChannelState(channel: channel, file: stateFile)
+                try self.invalidateDefaultChannelPreviewSnapshot(file: snapshotFile)
+                logger.info("Restored defaultChannel from preview snapshot")
+                return true
+            } catch {
+                logger.warn("Cannot persist restored default channel from preview snapshot: \(error.localizedDescription)")
+                return false
+            }
         }
     }
 
@@ -1910,7 +1938,12 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         }
 
         UserDefaults.standard.set(self.implementation.appId, forKey: self.previewPreviousAppIdDefaultsKey)
-        if let previousDefaultChannel = UserDefaults.standard.object(forKey: self.defaultChannelDefaultsKey) as? String {
+        let previousDefaultChannel = self.persistedDefaultChannel()
+        guard self.persistDefaultChannelPreviewSnapshot(channel: previousDefaultChannel) else {
+            logger.error("Could not durably save the default channel preview snapshot")
+            return false
+        }
+        if let previousDefaultChannel = previousDefaultChannel {
             UserDefaults.standard.set(previousDefaultChannel, forKey: self.previewPreviousDefaultChannelDefaultsKey)
             UserDefaults.standard.set(true, forKey: self.previewPreviousDefaultChannelWasSetDefaultsKey)
         } else {

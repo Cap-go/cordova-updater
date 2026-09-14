@@ -824,7 +824,10 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         }
 
         // Load defaultChannel: first try from persistent storage (set via setChannel), then fall back to config
-        if (this.prefs.contains(DEFAULT_CHANNEL_PREF_KEY)) {
+        if (this.defaultChannelCleanupMustRetry) {
+            this.implementation.defaultChannel = this.updaterConfig.getString("defaultChannel", "");
+            logger.warn("Using configured defaultChannel until persisted cleanup can retry");
+        } else if (this.prefs.contains(DEFAULT_CHANNEL_PREF_KEY)) {
             final String storedDefaultChannel = this.prefs.getString(DEFAULT_CHANNEL_PREF_KEY, "");
             if (storedDefaultChannel != null && !storedDefaultChannel.isEmpty()) {
                 this.implementation.defaultChannel = storedDefaultChannel;
@@ -4935,15 +4938,18 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         });
     }
 
+    private boolean isProcessLifecycleObserverActive() {
+        return this.appLifecycleObserver != null && this.appLifecycleObserver.isRegistered();
+    }
+
     public void onStart() {
         try {
             logger.info("handleOnStart: onActivityStarted " + getActivity().getClass().getName());
 
-            // On Android < 14, use activity lifecycle for foreground detection
-            // On Android 14+, ProcessLifecycleOwner handles this via AppLifecycleObserver
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // Use activity lifecycle when ProcessLifecycleOwner is unavailable or failed to register.
+            if (!this.isProcessLifecycleObserverActive()) {
                 if (isPreviousMainActivity) {
-                    logger.info("handleOnStart: appMovedToForeground (Android <14 path)");
+                    logger.info("handleOnStart: appMovedToForeground (activity lifecycle path)");
                     this.appMovedToForeground();
                 }
                 isPreviousMainActivity = true;
@@ -4959,12 +4965,11 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         try {
             logger.info("handleOnStop: onActivityStopped");
 
-            // On Android < 14, use activity lifecycle for background detection
-            // On Android 14+, ProcessLifecycleOwner handles this via AppLifecycleObserver
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // Use activity lifecycle when ProcessLifecycleOwner is unavailable or failed to register.
+            if (!this.isProcessLifecycleObserverActive()) {
                 isPreviousMainActivity = isMainActivity();
                 if (isPreviousMainActivity) {
-                    logger.info("handleOnStop: appMovedToBackground (Android <14 path)");
+                    logger.info("handleOnStop: appMovedToBackground (activity lifecycle path)");
                     this.appMovedToBackground();
                 }
             }

@@ -180,7 +180,7 @@ public class DownloadWorkerManager {
     private static Set<String> collectManifestIdsForVersion(WorkManager workManager, String version) {
         Set<String> downloadIds = new HashSet<>();
         try {
-            List<WorkInfo> workInfos = workManager.getWorkInfosByTag(version).get();
+            List<WorkInfo> workInfos = workManager.getWorkInfosByTag(version).get(5, TimeUnit.SECONDS);
             for (WorkInfo workInfo : workInfos) {
                 for (String tag : workInfo.getTags()) {
                     if (!"capacitor_updater_download".equals(tag) && !version.equals(tag)) {
@@ -188,6 +188,8 @@ public class DownloadWorkerManager {
                     }
                 }
             }
+        } catch (TimeoutException e) {
+            logger.error("Timed out collecting manifest ids before version cancel");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while collecting manifest ids before version cancel", e);

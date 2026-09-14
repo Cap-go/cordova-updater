@@ -201,8 +201,14 @@ public struct AES128Key {
             let written = buffer.withUnsafeBufferPointer { ptr -> Int in
                 Darwin.write(fd, ptr.baseAddress!.advanced(by: offset), count - offset)
             }
-            if written <= 0 {
+            if written < 0 {
+                if errno == EINTR {
+                    continue
+                }
                 throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [NSLocalizedDescriptionKey: "AES stream write failed"])
+            }
+            if written == 0 {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(EIO), userInfo: [NSLocalizedDescriptionKey: "AES stream write failed"])
             }
             offset += written
         }
