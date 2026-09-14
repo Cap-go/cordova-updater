@@ -61,8 +61,7 @@ case "$platform" in
       bunx cordova platform add android
     fi
     bunx cordova prepare android
-    cd platforms/android
-    ./gradlew assembleDebug
+    bunx cordova build android --no-interactive
     ;;
   ios)
     if [[ ! -d platforms/ios ]]; then
