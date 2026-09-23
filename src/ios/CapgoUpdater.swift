@@ -147,12 +147,19 @@ import UIKit
         case pathTraversal
     }
 
+    static func containsPathTraversalSegment(_ relativePath: String) -> Bool {
+        return relativePath.split(separator: "/").contains(where: { $0 == ".." })
+    }
+
     static func resolvePathInsideDirectory(baseDirectory: URL, relativePath: String) throws -> URL {
         if relativePath.isEmpty {
             throw SecurePathError.emptyPath
         }
         if relativePath.contains("\\") || relativePath.contains("\0") {
             throw SecurePathError.windowsPath
+        }
+        if containsPathTraversalSegment(relativePath) {
+            throw SecurePathError.pathTraversal
         }
         if (relativePath as NSString).isAbsolutePath {
             throw SecurePathError.absolutePath
@@ -164,17 +171,39 @@ import UIKit
         let canonicalTarget = canonicalBase.appendingPathComponent(relativePath).standardizedFileURL
         let canonicalTargetPath = canonicalTarget.path
 
-        if canonicalTargetPath != canonicalBasePath && !canonicalTargetPath.hasPrefix(normalizedBasePath) {
+        // Require a strict child of the base. Equality would accept "." and wipe/write the root.
+        if !canonicalTargetPath.hasPrefix(normalizedBasePath) {
             throw SecurePathError.pathTraversal
         }
 
         return canonicalTarget
     }
 
+    static func resolveBundleDirectory(libraryDir: URL, bundleId: String) throws -> URL {
+        let bundleRoot = libraryDir.appendingPathComponent("NoCloud/ionic_built_snapshots")
+        return try resolvePathInsideDirectory(baseDirectory: bundleRoot, relativePath: bundleId)
+    }
+
     static func resolveManifestTargetPath(baseDirectory: URL, fileName: String) throws -> URL {
         let isBrotli = fileName.hasSuffix(".br")
         let targetFileName = isBrotli ? String(fileName.dropLast(3)) : fileName
         return try resolvePathInsideDirectory(baseDirectory: baseDirectory, relativePath: targetFileName)
+    }
+
+    static func rememberManifestTarget(_ seenTargets: inout Set<String>, targetFile: URL) -> Bool {
+        return seenTargets.insert(targetFile.standardizedFileURL.path).inserted
+    }
+
+    private struct ManifestDownloadTask {
+        let fileName: String
+        let downloadUrl: String
+        let finalFileHash: String
+        let isBrotli: Bool
+        let destFileName: String
+        let destFilePath: URL
+        let builtinFilePath: URL
+        let cacheFilePath: URL?
+        let legacyCacheFilePath: URL?
     }
 
     private func isTimedOutError(_ error: Error?) -> Bool {
@@ -431,6 +460,18 @@ import UIKit
     private func randomString(length: Int) -> String {
         let letters: String = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         return String((0..<length).map { _ in letters.randomElement()! })
+    }
+
+    private func requireSessionKeyForEncryptedUpdate(sessionKey: String, versionName: String? = nil) throws {
+        if !self.publicKey.isEmpty && !CryptoCipher.isValidSessionKey(sessionKey) {
+            logger.error("Public key present but no valid session key provided")
+            self.sendStats(action: "session_key_required", versionName: versionName)
+            throw NSError(
+                domain: "CapgoUpdater",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Session key required when public key is present"]
+            )
+        }
     }
 
     public func setPublicKey(_ publicKey: String) {
@@ -967,7 +1008,13 @@ import UIKit
     /// `manifest` must only contain entries the caller already checksum-verified
     /// (as `downloadManifest` does) — the hashes are trusted as-is, not re-checked.
     func populateDeltaCache(for id: String, manifest: [ManifestEntry]? = nil, sessionKey: String = "") {
-        let bundleDir = self.getBundleDirectory(id: id)
+        let bundleDir: URL
+        do {
+            bundleDir = try self.getBundleDirectory(id: id)
+        } catch {
+            logger.debug("Skip delta cache population: invalid bundle id")
+            return
+        }
         let fileManager = FileManager.default
 
         guard fileManager.fileExists(atPath: bundleDir.path) else {
@@ -1223,7 +1270,10 @@ import UIKit
         guard var fileHash = entry.file_hash, !fileHash.isEmpty else {
             return nil
         }
-        if !self.publicKey.isEmpty && !sessionKey.isEmpty {
+        if !self.publicKey.isEmpty {
+            if !CryptoCipher.isValidSessionKey(sessionKey) {
+                return nil
+            }
             do {
                 fileHash = try CryptoCipher.decryptChecksum(checksum: fileHash, publicKey: self.publicKey)
             } catch {
@@ -1381,10 +1431,11 @@ import UIKit
     }
 
     public func downloadManifest(manifest: [ManifestEntry], version: String, sessionKey: String, link: String? = nil, comment: String? = nil) throws -> BundleInfo {
+        try self.requireSessionKeyForEncryptedUpdate(sessionKey: sessionKey, versionName: version)
         try self.runBeforeDownload()
         let id = self.randomString(length: 10)
         logger.info("downloadManifest start \(id)")
-        let destFolder = self.getBundleDirectory(id: id)
+        let destFolder = try self.getBundleDirectory(id: id)
         let builtinFolder = self.builtinFolderURL()
 
         // Check disk space before starting manifest download (estimate 100KB per file, minimum 50MB)
@@ -1413,8 +1464,8 @@ import UIKit
         var downloadError: Error?
         let errorLock = NSLock()
 
-        // Create operations for each file
-        var operations: [Operation] = []
+        var tasks: [ManifestDownloadTask] = []
+        var seenTargets = Set<String>()
 
         for entry in manifest {
             guard let fileName = entry.file_name,
@@ -1455,7 +1506,23 @@ import UIKit
             var fileHash = entryFileHash
 
             // Decrypt checksum if needed (done before creating operation)
-            if !self.publicKey.isEmpty && !sessionKey.isEmpty {
+            if !self.publicKey.isEmpty {
+                if !CryptoCipher.isValidSessionKey(sessionKey) {
+                    let error = NSError(
+                        domain: "CapgoUpdater",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Session key required when public key is present"]
+                    )
+                    self.sendStats(action: "session_key_required", versionName: version)
+                    errorLock.lock()
+                    if downloadError == nil {
+                        downloadError = error
+                    }
+                    errorLock.unlock()
+                    hasError.value = true
+                    logger.error("Public key present but no valid session key provided")
+                    continue
+                }
                 do {
                     fileHash = try CryptoCipher.decryptChecksum(checksum: fileHash, publicKey: self.publicKey)
                 } catch {
@@ -1485,7 +1552,25 @@ import UIKit
             let builtinFilePath: URL
             do {
                 destFilePath = try Self.resolveManifestTargetPath(baseDirectory: destFolder, fileName: fileName)
-                builtinFilePath = try Self.resolvePathInsideDirectory(baseDirectory: builtinFolder, relativePath: fileName)
+                builtinFilePath = try Self.resolveManifestTargetPath(baseDirectory: builtinFolder, fileName: fileName)
+                if !Self.rememberManifestTarget(&seenTargets, targetFile: destFilePath) {
+                    logger.error("Duplicate manifest target path: \(fileName)")
+                    self.sendStats(action: "manifest_path_fail", versionName: "\(version):\(fileName)")
+                    let error = NSError(
+                        domain: "ManifestEntryError",
+                        code: 3,
+                        userInfo: [
+                            NSLocalizedDescriptionKey: "Duplicate manifest target path for \(fileName)"
+                        ]
+                    )
+                    errorLock.lock()
+                    if downloadError == nil {
+                        downloadError = error
+                    }
+                    errorLock.unlock()
+                    hasError.value = true
+                    continue
+                }
             } catch {
                 logger.error("Invalid manifest file path: \(fileName)")
                 self.sendStats(action: "manifest_path_fail", versionName: "\(version):\(fileName)")
@@ -1498,8 +1583,40 @@ import UIKit
                 continue
             }
 
-            // Create parent directories synchronously (before operations start)
-            try? FileManager.default.createDirectory(at: destFilePath.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
+            tasks.append(
+                ManifestDownloadTask(
+                    fileName: fileName,
+                    downloadUrl: downloadUrl,
+                    finalFileHash: finalFileHash,
+                    isBrotli: isBrotli,
+                    destFileName: destFileName,
+                    destFilePath: destFilePath,
+                    builtinFilePath: builtinFilePath,
+                    cacheFilePath: cacheFilePath,
+                    legacyCacheFilePath: legacyCacheFilePath
+                )
+            )
+        }
+
+        if hasError.value {
+            let resolvedError = downloadError ?? NSError(
+                domain: "ManifestDownloadError",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Manifest download failed due to invalid or missing entries"]
+            )
+            let errorBundle = bundleInfo.setStatus(status: BundleStatus.ERROR.storedValue)
+            self.saveBundleInfo(id: id, bundle: errorBundle)
+            throw resolvedError
+        }
+
+        var operations: [Operation] = []
+
+        for task in tasks {
+            try FileManager.default.createDirectory(
+                at: task.destFilePath.deletingLastPathComponent(),
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
 
             let operation = BlockOperation { [weak self] in
                 guard let self = self else { return }
@@ -1507,26 +1624,29 @@ import UIKit
 
                 do {
                     // Try builtin first
-                    if FileManager.default.fileExists(atPath: builtinFilePath.path) && self.verifyChecksum(file: builtinFilePath, expectedHash: finalFileHash) {
-                        try self.copyItemReplacing(from: builtinFilePath, to: destFilePath)
-                        self.logger.info("downloadManifest \(fileName) using builtin file \(id)")
+                    if FileManager.default.fileExists(atPath: task.builtinFilePath.path) &&
+                        self.verifyChecksum(file: task.builtinFilePath, expectedHash: task.finalFileHash) {
+                        try self.copyItemReplacing(from: task.builtinFilePath, to: task.destFilePath)
+                        self.logger.info("downloadManifest \(task.fileName) using builtin file \(id)")
                     }
                     // Try cache
                     else if
-                        (cacheFilePath != nil && self.tryCopyFromCache(from: cacheFilePath!, to: destFilePath, expectedHash: finalFileHash)) ||
-                            (legacyCacheFilePath != nil && self.tryCopyFromCache(from: legacyCacheFilePath!, to: destFilePath, expectedHash: finalFileHash)) {
-                        self.logger.info("downloadManifest \(fileName) copy from cache \(id)")
+                        (task.cacheFilePath != nil &&
+                            self.tryCopyFromCache(from: task.cacheFilePath!, to: task.destFilePath, expectedHash: task.finalFileHash)) ||
+                            (task.legacyCacheFilePath != nil &&
+                                self.tryCopyFromCache(from: task.legacyCacheFilePath!, to: task.destFilePath, expectedHash: task.finalFileHash)) {
+                        self.logger.info("downloadManifest \(task.fileName) copy from cache \(id)")
                     }
                     // Download
                     else {
                         try self.downloadManifestFile(
-                            downloadUrl: downloadUrl,
-                            destFilePath: destFilePath,
-                            cacheFilePath: cacheFilePath,
-                            fileHash: finalFileHash,
-                            fileName: fileName,
-                            destFileName: destFileName,
-                            isBrotli: isBrotli,
+                            downloadUrl: task.downloadUrl,
+                            destFilePath: task.destFilePath,
+                            cacheFilePath: task.cacheFilePath,
+                            fileHash: task.finalFileHash,
+                            fileName: task.fileName,
+                            destFileName: task.destFileName,
+                            isBrotli: task.isBrotli,
                             sessionKey: sessionKey,
                             version: version,
                             bundleId: id
@@ -1544,8 +1664,8 @@ import UIKit
                     }
                     errorLock.unlock()
                     hasError.value = true
-                    self.logger.error("Manifest file download failed: \(fileName)")
-                    self.logger.debug("Bundle: \(id), File: \(fileName), Error: \(error.localizedDescription)")
+                    self.logger.error("Manifest file download failed: \(task.fileName)")
+                    self.logger.debug("Bundle: \(id), File: \(task.fileName), Error: \(error.localizedDescription)")
                 }
             }
 
@@ -1682,7 +1802,7 @@ import UIKit
 
         do {
             var source = partialURL
-            if !self.publicKey.isEmpty && !sessionKey.isEmpty {
+            if !self.publicKey.isEmpty && CryptoCipher.isValidSessionKey(sessionKey) {
                 let work = cacheFolder.appendingPathComponent("work_\(UUID().uuidString)_\((fileName as NSString).lastPathComponent)")
                 try FileManager.default.copyItem(at: partialURL, to: work)
                 workURL = work
@@ -1984,6 +2104,7 @@ import UIKit
     }
 
     public func download(url: URL, version: String, sessionKey: String, link: String? = nil, comment: String? = nil) throws -> BundleInfo {
+        try self.requireSessionKeyForEncryptedUpdate(sessionKey: sessionKey, versionName: version)
         try self.runBeforeDownload()
         let id: String = self.randomString(length: 10)
         // Each download uses its own temp files keyed by bundle ID to prevent collisions
@@ -2264,6 +2385,15 @@ import UIKit
         self.deleteLock.lock()
         defer { self.deleteLock.unlock() }
 
+        let destPersist: URL
+        do {
+            destPersist = try self.getBundleDirectory(id: id)
+        } catch {
+            logger.error("Cannot delete bundle with invalid id")
+            logger.debug("Bundle ID: \(id), Error: \(error.localizedDescription)")
+            return false
+        }
+
         let deleted: BundleInfo = self.getBundleInfo(id: id)
         if deleted.isBuiltin() || self.getCurrentBundleId() == id {
             logger.info("Cannot delete current or builtin bundle")
@@ -2292,7 +2422,6 @@ import UIKit
             return false
         }
 
-        let destPersist: URL = libraryDir.appendingPathComponent(bundleDirectory).appendingPathComponent(id)
         let hadRegistry = self.hasStoredBundleInfo(id: id)
         let hadFolder = FileManager.default.fileExists(atPath: destPersist.path)
         if !hadRegistry && !hadFolder {
@@ -2596,8 +2725,8 @@ import UIKit
         }
     }
 
-    public func getBundleDirectory(id: String) -> URL {
-        return libraryDir.appendingPathComponent(self.bundleDirectory).appendingPathComponent(id)
+    public func getBundleDirectory(id: String) throws -> URL {
+        return try Self.resolveBundleDirectory(libraryDir: libraryDir, bundleId: id)
     }
 
     struct ResetState {
@@ -2651,7 +2780,12 @@ import UIKit
     }
 
     private func bundleExists(id: String) -> Bool {
-        let destPersist: URL = self.getBundleDirectory(id: id)
+        let destPersist: URL
+        do {
+            destPersist = try self.getBundleDirectory(id: id)
+        } catch {
+            return false
+        }
         let indexPersist: URL = destPersist.appendingPathComponent("index.html")
         let bundleIndo: BundleInfo = self.getBundleInfo(id: id)
         if
@@ -2674,7 +2808,12 @@ import UIKit
         }
         if bundleExists(id: id) {
             let currentBundleName = self.getCurrentBundle().getVersionName()
-            self.setCurrentBundle(bundle: self.getBundleDirectory(id: id).path)
+            guard let bundleDir = try? self.getBundleDirectory(id: id) else {
+                self.setBundleStatus(id: id, status: BundleStatus.ERROR)
+                self.sendStats(action: "set_fail", versionName: newBundle.getVersionName())
+                return false
+            }
+            self.setCurrentBundle(bundle: bundleDir.path)
             self.setBundleStatus(id: id, status: BundleStatus.PENDING)
             self.sendStats(action: "set", versionName: newBundle.getVersionName(), oldVersionName: currentBundleName)
             return true
@@ -2688,7 +2827,10 @@ import UIKit
         guard !bundle.isBuiltin(), bundleExists(id: bundle.getId()) else {
             return false
         }
-        self.setCurrentBundle(bundle: self.getBundleDirectory(id: bundle.getId()).path)
+        guard let bundleDir = try? self.getBundleDirectory(id: bundle.getId()) else {
+            return false
+        }
+        self.setCurrentBundle(bundle: bundleDir.path)
         return true
     }
 
@@ -2703,7 +2845,10 @@ import UIKit
         guard bundleExists(id: bundle.getId()) else {
             return false
         }
-        self.setCurrentBundle(bundle: self.getBundleDirectory(id: bundle.getId()).path)
+        guard let bundleDir = try? self.getBundleDirectory(id: bundle.getId()) else {
+            return false
+        }
+        self.setCurrentBundle(bundle: bundleDir.path)
         return true
     }
 
