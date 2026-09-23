@@ -1461,6 +1461,10 @@ public class CapgoUpdater {
             }
         } catch (final IOException e) {
             logger.error("Download blocked: " + e.getMessage());
+            final Map<String, Object> ret = new HashMap<>();
+            ret.put("version", version);
+            ret.put("error", e.getMessage());
+            notifyListeners("downloadFailed", ret);
             return;
         }
         if (!this.runDownloadGateQuiet()) {
