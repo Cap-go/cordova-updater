@@ -1,6 +1,57 @@
 # @capgo/cordova-updater
 
-Cordova plugin for [Capgo](https://capgo.app) live updates (OTA). Mirrors the `@capgo/capacitor-updater` API for Cordova apps.
+<a href="https://capgo.app/"><img src="https://capgo.app/readme-banner.svg?repo=Cap-go/cordova-updater" alt="Capgo - Instant updates for Capacitor" /></a>
+
+[![Discord](https://badgen.net/badge/icon/discord?icon=discord&label)](https://discord.com/invite/VnYRvBfgA6)
+
+[![npm](https://img.shields.io/npm/dm/@capgo/cordova-updater)](https://www.npmjs.com/package/@capgo/cordova-updater)
+[![GitHub latest commit](https://badgen.net/github/last-commit/Cap-go/cordova-updater/main)](https://github.com/Cap-go/cordova-updater/commit/)
+[![https://good-labs.github.io/greater-good-affirmation/assets/images/badge.svg](https://good-labs.github.io/greater-good-affirmation/assets/images/badge.svg)](https://good-labs.github.io/greater-good-affirmation)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=Cap-go_cordova-updater&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=Cap-go_cordova-updater)
+[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=Cap-go_cordova-updater&metric=bugs)](https://sonarcloud.io/summary/new_code?id=Cap-go_cordova-updater)
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=Cap-go_cordova-updater&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=Cap-go_cordova-updater)
+[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=Cap-go_cordova-updater&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=Cap-go_cordova-updater)
+[![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=Cap-go_cordova-updater&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=Cap-go_cordova-updater)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=Cap-go_cordova-updater&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Cap-go_cordova-updater)
+[![Technical Debt](https://sonarcloud.io/api/project_badges/measure?project=Cap-go_cordova-updater&metric=sqale_index)](https://sonarcloud.io/summary/new_code?id=Cap-go_cordova-updater)
+[![Open Bounties](https://img.shields.io/endpoint?url=https%3A%2F%2Fconsole.algora.io%2Fapi%2Fshields%2FCapgo%2Fbounties%3Fstatus%3Dopen)](https://console.algora.io/org/Capgo/bounties?status=open)
+[![Rewarded Bounties](https://img.shields.io/endpoint?url=https%3A%2F%2Fconsole.algora.io%2Fapi%2Fshields%2FCapgo%2Fbounties%3Fstatus%3Dcompleted)](https://console.algora.io/org/Capgo/bounties?status=completed)
+
+<div align="center">
+  <h2><a href="https://capgo.app/?ref=plugin_cordova_updater"> ➡️ Get Instant updates for your App with Capgo</a></h2>
+  <h2><a href="https://capgo.app/consulting/?ref=plugin_cordova_updater"> Missing a feature? We’ll build the plugin for you 💪</a></h2>
+</div>
+
+Cordova plugin for [Capgo](https://capgo.app) live updates (OTA). Ship JavaScript, HTML, and CSS updates to Cordova Android and iOS apps without waiting on app store review.
+
+Already using `@capgo/capacitor-updater`? This plugin mirrors the same JavaScript API and uses the same Capgo Cloud backend, channels, and bundle signing model — adapted for Cordova.
+
+## Why Cordova Updater?
+
+Cordova apps still need fast web asset delivery between store releases. `@capgo/cordova-updater` brings Capgo's rollback-safe OTA model to Cordova without migrating to Capacitor first.
+
+- **Same API** — Call `notifyAppReady()`, `download()`, `next()`, channel APIs, and stats hooks with the same surface as `@capgo/capacitor-updater`
+- **Native scheme support** — Hooks Cordova's path and scheme handlers so downloaded bundles replace WebView content on modern Cordova Android and iOS
+- **Capgo Cloud ready** — Upload bundles with `@capgo/cli`, roll out by channel, and monitor adoption from the same dashboard you use for Capacitor apps
+- **Rollback protection** — Automatically revert broken updates to keep your app stable
+- **Delta updates** — Only download changed files for faster updates
+- **Open source** — Self-host or use [Capgo Cloud](https://capgo.app/), with full control over your update infrastructure
+
+Perfect for fixing bugs immediately, A/B testing features, and maintaining control over your release schedule on legacy Cordova stacks.
+
+## Documentation
+
+The most complete doc is available here: https://capgo.app/docs/plugins/cordova-updater/
+
+## Compatibility
+
+| Platform | Minimum version |
+| --- | --- |
+| Cordova | 12+ |
+| Cordova Android | 13+ |
+| Cordova iOS | 7+ |
+
+> **Note:** The JavaScript API mirrors [`@capgo/capacitor-updater`](https://github.com/Cap-go/capacitor-updater). Web is not supported — desktop/Electron apps should use [`@capgo/electron-updater`](https://github.com/Cap-go/electron-updater).
 
 ## Install
 
