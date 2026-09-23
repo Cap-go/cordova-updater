@@ -1,6 +1,6 @@
 {
   "name": "@capgo/cordova-updater",
-  "version": "8.1.2",
+  "version": "8.1.3",
   "license": "MPL-2.0",
   "description": "Live update Cordova plugin for Capgo",
   "main": "dist/plugin.cjs.js",

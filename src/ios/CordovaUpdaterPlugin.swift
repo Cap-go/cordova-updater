@@ -88,7 +88,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     }()
 
                 public var implementation = CapgoUpdater()
-    private let pluginVersion: String = "8.1.2"
+    private let pluginVersion: String = "8.1.3"
     static let updateUrlDefault = "https://plugin.capgo.app/updates"
     static let statsUrlDefault = "https://plugin.capgo.app/stats"
     static let channelUrlDefault = "https://plugin.capgo.app/channel_self"
