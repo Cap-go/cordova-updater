@@ -1,6 +1,6 @@
 # @capgo/cordova-updater
 
-<a href="https://capgo.app/"><img src="https://capgo.app/readme-banner.svg?repo=Cap-go/cordova-updater" alt="Capgo - Instant updates for Capacitor" /></a>
+<a href="https://capgo.app/"><img src="https://capgo.app/readme-banner.svg?repo=Cap-go/cordova-updater" alt="Capgo - Cordova Updater - Instant updates for Cordova" /></a>
 
 [![Discord](https://badgen.net/badge/icon/discord?icon=discord&label)](https://discord.com/invite/VnYRvBfgA6)
 
