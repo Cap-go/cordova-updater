@@ -68,6 +68,8 @@ export interface CordovaUpdaterConfig {
        * - `"always"`: Direct install whenever Auto Update runs.
        * - `"onlyDownload"`: Check and download updates automatically, emit `updateAvailable`, but never direct install or set the next bundle automatically.
        *
+       * **Instant apply modes** (`"atInstall"`, `"onLaunch"`, `"always"`): upload bundles with the Capgo CLI `--delta` flag so only changed files download and the user experience stays fast. Also enable {@link autoSplashscreen} and install `@capacitor/splash-screen` with `launchAutoHide: false`.
+       *
        * Only available for Android and iOS.
        *
        * @default true
@@ -161,11 +163,11 @@ export interface CordovaUpdaterConfig {
       directUpdate?: boolean | 'atInstall' | 'always' | 'onLaunch';
 
       /**
-       * Automatically handle splashscreen hiding when using directUpdate. When enabled, the plugin will automatically hide the splashscreen after updates are applied or when no update is needed.
+       * Automatically handle splashscreen hiding when using instant apply modes. When enabled, the plugin will automatically hide the splashscreen after updates are applied or when no update is needed.
        * This removes the need to manually listen for appReady events and call SplashScreen.hide().
-       * Only works when autoUpdate is set to "atInstall", "always", or "onLaunch", or when the deprecated directUpdate option is set to "atInstall", "always", "onLaunch", or true.
+       * **Required** when `autoUpdate` is set to `"atInstall"`, `"onLaunch"`, or `"always"` (legacy `directUpdate` instant modes included). Without this option and the splash-screen plugin below, instant apply can leave users on a blank screen or dismiss the splash before the update finishes.
        * Requires the @capacitor/splash-screen plugin to be installed and configured with launchAutoHide: false.
-       * Requires Auto Update and Direct Update behavior to be enabled.
+       * Requires Auto Update and instant apply behavior to be enabled.
        *
        * Only available for Android and iOS.
        *
