@@ -44,15 +44,37 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - name: Install npm CLI for staged publishing
         run: npm install -g npm@^11.15.0
+      - name: Check if package exists on npm
+        id: npm_exists
+        run: |
+          if npm view "$(node -p "require('./package.json').name")" version >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Bootstrap publish to npm (first release)
+        if: steps.npm_exists.outputs.exists == 'false' && !contains(github.ref, '-alpha.')
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm --version
+          npm publish --provenance --access public --ignore-scripts
+      - name: Bootstrap publish to npm with next tag (first release)
+        if: steps.npm_exists.outputs.exists == 'false' && contains(github.ref, '-alpha.')
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm --version
+          npm publish --tag next --provenance --access public --ignore-scripts
       - name: Stage publish to npm
-        if: ${{ !contains(github.ref, '-alpha.') }}
+        if: steps.npm_exists.outputs.exists == 'true' && !contains(github.ref, '-alpha.')
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           npm --version
           npm stage publish --tag latest --provenance --access public --ignore-scripts
       - name: Stage publish to npm with next tag
-        if: ${{ contains(github.ref, '-alpha.') }}
+        if: steps.npm_exists.outputs.exists == 'true' && contains(github.ref, '-alpha.')
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
