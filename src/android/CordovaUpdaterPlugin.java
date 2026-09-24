@@ -4494,6 +4494,23 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                             return;
                         }
 
+                        final String latestSessionKey = jsRes.has("sessionKey") ? jsRes.getString("sessionKey") : "";
+                        if (
+                            !CordovaUpdaterPlugin.this.implementation.publicKey.isEmpty() &&
+                            !CryptoCipher.isValidSessionKey(latestSessionKey)
+                        ) {
+                            logger.error("Public key present but no valid session key provided");
+                            CordovaUpdaterPlugin.this.implementation.sendStats("session_key_required");
+                            CordovaUpdaterPlugin.this.endBackGroundTaskWithNotif(
+                                "Session key required when public key is present",
+                                latestVersionName,
+                                current,
+                                true,
+                                plannedDirectUpdate
+                            );
+                            return;
+                        }
+
                         if (
                             latestVersionName != null && !latestVersionName.isEmpty() && !current.getVersionName().equals(latestVersionName)
                         ) {
@@ -4512,12 +4529,9 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                                     );
                                     return;
                                 }
-                                final String latestSessionKey = jsRes.has("sessionKey") ? jsRes.getString("sessionKey") : "";
                                 if (
                                     latest.isDownloaded() &&
-                                    BundleStatus.DOWNLOADING != latest.getStatus() &&
-                                    (CordovaUpdaterPlugin.this.implementation.publicKey.isEmpty() ||
-                                        CryptoCipher.isValidSessionKey(latestSessionKey))
+                                    BundleStatus.DOWNLOADING != latest.getStatus()
                                 ) {
                                     logger.info("Latest bundle already exists and download is NOT required. " + messageUpdate);
                                     final boolean directUpdateAllowedNow = CordovaUpdaterPlugin.this.isDirectUpdateCurrentlyAllowed(

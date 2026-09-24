@@ -4141,6 +4141,17 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
                         )
                         return
                     }
+                    if res.manifest == nil && (res.checksum ?? "").isEmpty {
+                        self.logger.error("No checksum provided")
+                        self.implementation.sendStats(action: "checksum_required", versionName: latestVersionName)
+                        self.endBackGroundTaskWithNotif(
+                            msg: "Checksum required",
+                            latestVersionName: latestVersionName,
+                            current: current,
+                            plannedDirectUpdate: plannedDirectUpdate
+                        )
+                        return
+                    }
                     var nextImpl = self.implementation.getBundleInfoByVersionName(version: latestVersionName)
                     if nextImpl == nil || nextImpl?.isDeleted() == true {
                         if nextImpl?.isDeleted() == true {
@@ -4187,7 +4198,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
                     res.checksum = try CryptoCipher.decryptChecksum(checksum: res.checksum, publicKey: self.implementation.publicKey)
                     CryptoCipher.logChecksumInfo(label: "Bundle checksum", hexChecksum: next.getChecksum())
                     CryptoCipher.logChecksumInfo(label: "Expected checksum", hexChecksum: res.checksum)
-                    if res.checksum != "" && next.getChecksum() != res.checksum && res.manifest == nil {
+                    if res.manifest == nil && next.getChecksum() != res.checksum {
                         self.logger.error("Error checksum \(next.getChecksum()) \(res.checksum)")
                         self.implementation.sendStats(action: "checksum_fail", versionName: next.getVersionName())
                         let id = next.getId()
