@@ -2546,6 +2546,16 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         final String checksum,
         final JSONArray manifest
     ) throws IOException {
+        if (!this.implementation.publicKey.isEmpty() && !CryptoCipher.isValidSessionKey(sessionKey)) {
+            logger.error("Public key present but no valid session key provided");
+            this.implementation.sendStats("session_key_required");
+            throw new IOException("Session key required when public key is present");
+        }
+        if (manifest == null && (checksum == null || checksum.isEmpty())) {
+            logger.error("No checksum provided");
+            this.implementation.sendStats("checksum_required");
+            throw new IOException("Checksum required");
+        }
         if (manifest != null) {
             return this.implementation.downloadManifest(url, version, sessionKey, checksum, manifest);
         }
@@ -4487,6 +4497,22 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                         if (
                             latestVersionName != null && !latestVersionName.isEmpty() && !current.getVersionName().equals(latestVersionName)
                         ) {
+                            final String latestSessionKey = jsRes.has("sessionKey") ? jsRes.getString("sessionKey") : "";
+                            if (
+                                !CordovaUpdaterPlugin.this.implementation.publicKey.isEmpty() &&
+                                !CryptoCipher.isValidSessionKey(latestSessionKey)
+                            ) {
+                                logger.error("Public key present but no valid session key provided");
+                                CordovaUpdaterPlugin.this.implementation.sendStats("session_key_required");
+                                CordovaUpdaterPlugin.this.endBackGroundTaskWithNotif(
+                                    "Session key required when public key is present",
+                                    latestVersionName,
+                                    current,
+                                    true,
+                                    plannedDirectUpdate
+                                );
+                                return;
+                            }
                             final BundleInfo latest = CordovaUpdaterPlugin.this.implementation.getBundleInfoByName(latestVersionName);
                             if (latest != null) {
                                 final app.capgo.cordova.updater.compat.JSObject ret = new app.capgo.cordova.updater.compat.JSObject();
@@ -4502,7 +4528,10 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                                     );
                                     return;
                                 }
-                                if (latest.isDownloaded() && BundleStatus.DOWNLOADING != latest.getStatus()) {
+                                if (
+                                    latest.isDownloaded() &&
+                                    BundleStatus.DOWNLOADING != latest.getStatus()
+                                ) {
                                     logger.info("Latest bundle already exists and download is NOT required. " + messageUpdate);
                                     final boolean directUpdateAllowedNow = CordovaUpdaterPlugin.this.isDirectUpdateCurrentlyAllowed(
                                         plannedDirectUpdate
