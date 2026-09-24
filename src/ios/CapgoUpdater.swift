@@ -165,10 +165,10 @@ import UIKit
             throw SecurePathError.absolutePath
         }
 
-        let canonicalBase = baseDirectory.standardizedFileURL
+        let canonicalBase = baseDirectory.resolvingSymlinksInPath()
         let canonicalBasePath = canonicalBase.path
         let normalizedBasePath = canonicalBasePath.hasSuffix("/") ? canonicalBasePath : "\(canonicalBasePath)/"
-        let canonicalTarget = canonicalBase.appendingPathComponent(relativePath).standardizedFileURL
+        let canonicalTarget = canonicalBase.appendingPathComponent(relativePath).resolvingSymlinksInPath()
         let canonicalTargetPath = canonicalTarget.path
 
         // Require a strict child of the base. Equality would accept "." and wipe/write the root.

@@ -173,7 +173,7 @@ public class CryptoCipher {
 
             SecretKey sKey = CryptoCipher.byteToSessionKey(decryptedSessionKey);
             decryptAesFile(file, sKey, iv);
-        } catch (GeneralSecurityException e) {
+        } catch (GeneralSecurityException | IllegalArgumentException e) {
             if (logger != null) {
                 logger.info("decryptFile fail");
             }
