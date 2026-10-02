@@ -56,7 +56,12 @@ public class Version implements Comparable<Version> {
     public Version(@Nullable String versionString) {
         originalString = versionString;
         if (originalString != null && startsNumeric(originalString)) {
-            String[] versionTokens = originalString.replaceAll("\\s", "").split("\\.");
+            String normalized = originalString.replaceAll("\\s", "");
+            final int buildMetadata = normalized.indexOf('+');
+            if (buildMetadata >= 0) {
+                normalized = normalized.substring(0, buildMetadata);
+            }
+            String[] versionTokens = normalized.split("\\.");
             boolean suffixFound = false;
             StringBuilder suffixSb = null;
 
@@ -275,10 +280,11 @@ public class Version implements Comparable<Version> {
     }
 
     private static long safeParseLong(@NonNull String numbers) {
-        if (numbers.length() > 19) {
-            numbers = numbers.substring(0, 19);
+        try {
+            return Long.parseLong(numbers);
+        } catch (NumberFormatException e) {
+            return Long.MAX_VALUE;
         }
-        return Long.parseLong(numbers);
     }
 
     private static boolean isNumeric(@NonNull final CharSequence cs) {

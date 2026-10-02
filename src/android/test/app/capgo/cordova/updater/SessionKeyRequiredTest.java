@@ -265,6 +265,7 @@ public class SessionKeyRequiredTest {
         updater.downloadBackground("https://example.com/update.zip", "1.0.0", "", "checksum", null);
 
         assertTrue(updater.getSentStatsActions().contains("session_key_required"));
+        assertEquals(null, updater.getBundleInfoByName("1.0.0"));
     }
 
     @Test
@@ -305,6 +306,7 @@ public class SessionKeyRequiredTest {
             invokeBackgroundDownload(plugin);
 
             assertTrue(updater.getSentStatsActions().contains("session_key_required"));
+            assertEquals(null, updater.getBundleInfoByName("2.0.0"));
         }
     }
 
@@ -327,6 +329,7 @@ public class SessionKeyRequiredTest {
             invokeBackgroundDownload(plugin);
 
             assertTrue(updater.getSentStatsActions().contains("session_key_required"));
+            assertEquals(null, updater.getBundleInfoByName("2.0.0"));
         }
     }
 }

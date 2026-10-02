@@ -34,7 +34,7 @@ enum ZipCentralDirectory {
         var end: UInt64
     }
 
-    static func readEntries(handle: FileHandle, fileSize: UInt64) throws -> [ZipEntry] {
+    static func readEntries(handle: FileHandle, fileSize: UInt64) throws -> (entries: [ZipEntry], centralDirectoryOffset: UInt64) {
         let location = try locateCentralDirectory(handle: handle, fileSize: fileSize)
         guard location.offset <= location.end, location.size <= location.end - location.offset else {
             throw ZipError.invalidCentralDirectory
@@ -53,7 +53,10 @@ enum ZipCentralDirectory {
             entries.append(entry)
             cursor = next
         }
-        return entries
+        guard cursor == data.count else {
+            throw ZipError.invalidCentralDirectory
+        }
+        return (entries, location.offset)
     }
 
     private static func locateCentralDirectory(handle: FileHandle, fileSize: UInt64) throws -> Location {
@@ -226,7 +229,7 @@ enum ZipCentralDirectory {
                 return hasDirectorySuffix ? .directory : .file
             }
         case 0: // MS-DOS
-            return hasDirectorySuffix || (externalAttributes >> 4) == 0x01 ? .directory : .file
+            return hasDirectorySuffix || (externalAttributes & 0x10) != 0 ? .directory : .file
         default:
             return hasDirectorySuffix ? .directory : .file
         }

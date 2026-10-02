@@ -42,6 +42,7 @@ final class CapgoSemanticVersionTests: XCTestCase {
         XCTAssertTrue(try version("1.0.0-alpha") < version("1.0.0-alpha.1"))
         XCTAssertTrue(try version("1.0.0-alpha.1") < version("1.0.0-beta"))
         XCTAssertTrue(try version("1.0.0-beta.2") < version("1.0.0-beta.11"))
+        XCTAssertTrue(try version("1.0.0-2") < version("1.0.0-1a"))
         XCTAssertTrue(try version("1.0.0-rc.1") < version("1.0.0"))
         XCTAssertFalse(try version("1.0.0") < version("1.0.0-rc.1"))
         XCTAssertTrue(try version("2.1.0") > version("2.0.9"))

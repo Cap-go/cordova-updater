@@ -188,7 +188,7 @@ export interface CordovaUpdaterConfig {
       /**
        * Display a native loading indicator on top of the splashscreen while automatic direct updates are running.
        * Only takes effect when {@link autoSplashscreen} is enabled.
-       * Requires the a splash screen plugin plugin to be installed and configured with launchAutoHide: false.
+       * Requires a splash screen plugin to be installed and configured with launchAutoHide: false.
        *
        * Only available for Android and iOS.
        *
@@ -1780,6 +1780,8 @@ export interface CordovaUpdaterPlugin {
  * downloading: The bundle is being downloaded.
  * success: The bundle has been downloaded and is ready to be **SET** as the next bundle.
  * error: The bundle has failed to download.
+ * deleted: The bundle was removed from disk and is no longer available.
+ * deleting: The bundle is being removed from disk.
  */
 export type BundleStatus = 'success' | 'error' | 'pending' | 'downloading' | 'deleted' | 'deleting';
 

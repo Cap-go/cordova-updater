@@ -286,6 +286,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         periodCheckDelay = Self.normalizedPeriodCheckDelaySeconds(readConfigInt("periodCheckDelay", 0))
 
         implementation.setPublicKey(readConfigString("publicKey") ?? "")
+        implementation.allowHttpsToHttpRedirect = readConfigBool("allowHttpsToHttpRedirect", false)
         implementation.notifyDownloadRaw = notifyDownload
         implementation.notifyListeners = { [weak self] eventName, data in
             let emit = {
@@ -3144,20 +3145,22 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     }
 
     private func armReadyGuard(webView: WKWebView?) {
-        let generation = self.readyGeneration + 1
+        let generation: Int
+        if self.readyGuardArmed {
+            generation = self.readyGeneration
+        } else {
+            generation = self.readyGeneration + 1
+            self.readyGeneration = generation
+            self.readyGuardArmed = true
+        }
         guard let webView else {
             logger.warn("Cannot stamp notifyAppReady generation without a webview")
             self.readyGuardArmed = false
             return
         }
-        let userScript = WKUserScript(
-            source: CordovaUpdaterPlugin.readyGenerationScript(generation),
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: true
-        )
-        webView.configuration.userContentController.addUserScript(userScript)
-        self.readyGeneration = generation
-        self.readyGuardArmed = true
+        DispatchQueue.main.async {
+            webView.evaluateJavaScript(CordovaUpdaterPlugin.readyGenerationScript(generation), completionHandler: nil)
+        }
     }
 
     private func reportedReadyGeneration(_ call: CAPPluginCall) -> Int? {

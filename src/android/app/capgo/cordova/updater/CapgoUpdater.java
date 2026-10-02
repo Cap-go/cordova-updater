@@ -1561,6 +1561,7 @@ public class CapgoUpdater {
             }
         } catch (final IOException e) {
             logger.error("Download blocked: " + e.getMessage());
+            this.backgroundDownloadSettled(this.getCurrentBundle(), launchDownloadReadyStatus(false, setNext));
             return;
         }
         if (!this.runDownloadGateQuiet()) {

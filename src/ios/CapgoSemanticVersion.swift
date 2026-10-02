@@ -137,25 +137,44 @@ public struct CapgoSemanticVersion: Comparable, Hashable, CustomStringConvertibl
         return !value.isEmpty && value.utf8.allSatisfy { $0 >= 0x30 && $0 <= 0x39 }
     }
 
+    private static func compareNumericIdentifiers(_ left: String, _ right: String) -> ComparisonResult {
+        if left.count != right.count {
+            return left.count < right.count ? .orderedAscending : .orderedDescending
+        }
+        if left == right {
+            return .orderedSame
+        }
+        return left < right ? .orderedAscending : .orderedDescending
+    }
+
     private static func comparePrerelease(_ lhs: String, _ rhs: String) -> ComparisonResult {
         let lhsComponents = lhs.components(separatedBy: ".")
         let rhsComponents = rhs.components(separatedBy: ".")
-        if let (left, right) = zip(lhsComponents, rhsComponents).first(where: { $0.0 != $0.1 }) {
-            if isNumericIdentifier(left) && isNumericIdentifier(right) {
-                let leftValue = Int(left) ?? 0
-                let rightValue = Int(right) ?? 0
-                if leftValue == rightValue {
-                    return .orderedSame
+        let count = max(lhsComponents.count, rhsComponents.count)
+        for index in 0..<count {
+            let left = index < lhsComponents.count ? lhsComponents[index] : nil
+            let right = index < rhsComponents.count ? rhsComponents[index] : nil
+            switch (left, right) {
+            case (nil, nil):
+                continue
+            case (nil, _):
+                return .orderedAscending
+            case (_, nil):
+                return .orderedDescending
+            case let (l?, r?) where l == r:
+                continue
+            case let (l?, r?) where isNumericIdentifier(l) && isNumericIdentifier(r):
+                let cmp = compareNumericIdentifiers(l, r)
+                if cmp != .orderedSame {
+                    return cmp
                 }
-                return leftValue < rightValue ? .orderedAscending : .orderedDescending
+            case let (l?, r?) where isNumericIdentifier(l) && !isNumericIdentifier(r):
+                return .orderedAscending
+            case let (l?, r?) where !isNumericIdentifier(l) && isNumericIdentifier(r):
+                return .orderedDescending
+            case let (l?, r?):
+                return l < r ? .orderedAscending : .orderedDescending
             }
-            if left == right {
-                return .orderedSame
-            }
-            return left < right ? .orderedAscending : .orderedDescending
-        }
-        if lhsComponents.count != rhsComponents.count {
-            return lhsComponents.count < rhsComponents.count ? .orderedAscending : .orderedDescending
         }
         return .orderedSame
     }

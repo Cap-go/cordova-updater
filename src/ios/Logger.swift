@@ -3,7 +3,7 @@ import os.log
 import WebKit
 
 public class Logger {
-    static let maxWebViewLogPayloadChars = 4096
+    static let maxWebViewLogPayloadBytes = 4096
 
     public enum LogLevel: Int {
         case silent = 0
@@ -174,9 +174,11 @@ public class Logger {
         // This will never fail, but we have to keep swift happy
         if let label = _labels[level] {
             log(atLevel: level, label: label, tag: tag, message: message)
-            if let webView = self.webView, let script = buildWebViewConsoleScript(level: level, label: label, tag: tag, message: message) {
+            if let webView = self.webView {
                 DispatchQueue.main.async {
-                    webView.evaluateJavaScript(script, completionHandler: nil)
+                    if let script = self.buildWebViewConsoleScript(level: level, label: label, tag: tag, message: message) {
+                        webView.evaluateJavaScript(script, completionHandler: nil)
+                    }
                 }
             }
         }
@@ -215,7 +217,7 @@ public class Logger {
 
     func capWebViewLogPayload(_ payload: String) -> String {
         let suffix = "..."
-        let maxPayloadBytes = Logger.maxWebViewLogPayloadChars
+        let maxPayloadBytes = Logger.maxWebViewLogPayloadBytes
         let payloadBytes = Array(payload.utf8.prefix(maxPayloadBytes + 1))
         if payloadBytes.count <= maxPayloadBytes {
             return payload

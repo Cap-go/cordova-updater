@@ -28,6 +28,8 @@ final class LoggerSecurityTests: XCTestCase {
         let logger = Logger(withTag: "LoggerSecurityTests")
 
         for payload in injectionPayloads {
+            let literal = logger.toJSStringLiteral(payload)
+            XCTAssertFalse(literal.unicodeScalars.contains { $0.value == 0x2028 || $0.value == 0x2029 })
             try assertRoundTripJSStringLiteral(logger: logger, value: payload)
         }
     }
@@ -64,9 +66,8 @@ final class LoggerSecurityTests: XCTestCase {
                 tag: "tag\");alert(1)//",
                 message: payload
             )
-            XCTAssertNotNil(script)
             try assertSafeConsoleScript(
-                script!,
+                XCTUnwrap(script),
                 consoleMethod: "error",
                 expectedPayload: "🔴 tag\");alert(1)// : \(payload)",
                 logger: logger
@@ -98,16 +99,16 @@ final class LoggerSecurityTests: XCTestCase {
 
     func testCapWebViewLogPayloadTruncatesOversizedMessages() {
         let logger = Logger(withTag: "LoggerSecurityTests")
-        let oversized = String(repeating: "x", count: Logger.maxWebViewLogPayloadChars + 10)
+        let oversized = String(repeating: "x", count: Logger.maxWebViewLogPayloadBytes + 10)
         let capped = logger.capWebViewLogPayload(oversized)
 
         XCTAssertTrue(capped.hasSuffix("..."))
-        XCTAssertLessThanOrEqual(capped.utf8.count, Logger.maxWebViewLogPayloadChars + 3)
+        XCTAssertLessThanOrEqual(capped.utf8.count, Logger.maxWebViewLogPayloadBytes + 3)
     }
 
     func testCapWebViewLogPayloadPreservesValidUtf8Boundaries() {
         let logger = Logger(withTag: "LoggerSecurityTests")
-        let prefix = String(repeating: "x", count: Logger.maxWebViewLogPayloadChars - 1)
+        let prefix = String(repeating: "x", count: Logger.maxWebViewLogPayloadBytes - 1)
         let capped = logger.capWebViewLogPayload(prefix + "💡")
 
         XCTAssertEqual(prefix + "...", capped)
@@ -115,7 +116,7 @@ final class LoggerSecurityTests: XCTestCase {
 
     func testCapWebViewLogPayloadPreservesCompleteScalarsAtByteLimit() {
         let logger = Logger(withTag: "LoggerSecurityTests")
-        let prefix = String(repeating: "x", count: Logger.maxWebViewLogPayloadChars - 2)
+        let prefix = String(repeating: "x", count: Logger.maxWebViewLogPayloadBytes - 2)
         let capped = logger.capWebViewLogPayload(prefix + "éoverflow")
 
         XCTAssertEqual(prefix + "é...", capped)

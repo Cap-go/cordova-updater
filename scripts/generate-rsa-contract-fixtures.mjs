@@ -99,5 +99,16 @@ const fixture = {
   ],
 };
 
+if (process.argv.includes('--check')) {
+  const existing = fs.readFileSync(outputPath, 'utf8');
+  const generated = `${JSON.stringify(fixture, null, 2)}\n`;
+  if (existing !== generated) {
+    console.error('crypto-rsa.json is out of date; run bun scripts/generate-rsa-contract-fixtures.mjs');
+    process.exit(1);
+  }
+  console.log('crypto-rsa.json is up to date');
+  process.exit(0);
+}
+
 fs.writeFileSync(outputPath, `${JSON.stringify(fixture, null, 2)}\n`);
 console.log(`Wrote ${outputPath}`);

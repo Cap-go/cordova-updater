@@ -74,7 +74,20 @@ import UIKit
     private let statsQueueLock = NSLock()
     private let statsPersistLock = NSLock()
     private var statsFlushTimer: Timer?
-    private var statsStopped = false
+    private var _statsStopped = false
+
+    private var statsStopped: Bool {
+        get {
+            statsQueueLock.lock()
+            defer { statsQueueLock.unlock() }
+            return _statsStopped
+        }
+        set {
+            statsQueueLock.lock()
+            defer { statsQueueLock.unlock() }
+            _statsStopped = newValue
+        }
+    }
     private static let statsFlushInterval: TimeInterval = 1.0
     private static let maxPendingStats = 200
     private let pendingStatsFileName = "capgo_pending_stats.json"
@@ -150,10 +163,10 @@ import UIKit
             throw SecurePathError.absolutePath
         }
 
-        let canonicalBase = baseDirectory.standardizedFileURL
+        let canonicalBase = baseDirectory.standardizedFileURL.resolvingSymlinksInPath()
         let canonicalBasePath = canonicalBase.path
         let normalizedBasePath = canonicalBasePath.hasSuffix("/") ? canonicalBasePath : "\(canonicalBasePath)/"
-        let canonicalTarget = canonicalBase.appendingPathComponent(relativePath).standardizedFileURL
+        let canonicalTarget = canonicalBase.appendingPathComponent(relativePath).standardizedFileURL.resolvingSymlinksInPath()
         let canonicalTargetPath = canonicalTarget.path
 
         // Require a strict child of the base. Equality would accept "." and wipe/write the root.
@@ -270,14 +283,6 @@ import UIKit
     public var allowHttpsToHttpRedirect: Bool {
         get { redirectPolicy.allowHttpsToHttpRedirect }
         set { redirectPolicy.allowHttpsToHttpRedirect = newValue }
-    }
-
-    /// Runs a raw data task on the updater session (no cookies, no cache, redirect policy applied).
-    @discardableResult
-    func startRawDataTask(_ request: URLRequest, completion: @escaping (Data?, URLResponse?, Error?) -> Void) -> URLSessionDataTask {
-        let task = self.urlSession.dataTask(with: request, completionHandler: completion)
-        task.resume()
-        return task
     }
 
     /// Runs a data task and reports `(data, response, error)` like Alamofire's `responseData` did:

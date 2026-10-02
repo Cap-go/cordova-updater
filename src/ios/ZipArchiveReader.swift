@@ -58,6 +58,7 @@ final class ZipArchiveReader {
     let entries: [ZipEntry]
     private let fileHandle: FileHandle
     private let fileSize: UInt64
+    private let centralDirectoryOffset: UInt64
 
     init(url: URL) throws {
         let handle: FileHandle
@@ -70,7 +71,9 @@ final class ZipArchiveReader {
             let size = try handle.seekToEnd()
             self.fileHandle = handle
             self.fileSize = size
-            self.entries = try ZipCentralDirectory.readEntries(handle: handle, fileSize: size)
+            let archiveIndex = try ZipCentralDirectory.readEntries(handle: handle, fileSize: size)
+            self.entries = archiveIndex.entries
+            self.centralDirectoryOffset = archiveIndex.centralDirectoryOffset
         } catch {
             try? handle.close()
             throw error
@@ -151,6 +154,9 @@ final class ZipArchiveReader {
     }
 
     private func readStored(from offset: UInt64, size: UInt64, bufferSize: Int, consumer: (Data) throws -> Void) throws {
+        guard offset + size <= centralDirectoryOffset else {
+            throw ZipError.corruptedEntryData
+        }
         guard size <= fileSize, offset <= fileSize - size else {
             throw ZipError.truncatedEntryData
         }
@@ -177,6 +183,9 @@ final class ZipArchiveReader {
         bufferSize: Int,
         consumer: (Data) throws -> Void
     ) throws {
+        guard offset + compressedSize <= centralDirectoryOffset else {
+            throw ZipError.corruptedEntryData
+        }
         guard compressedSize <= fileSize, offset <= fileSize - compressedSize else {
             throw ZipError.truncatedEntryData
         }

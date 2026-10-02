@@ -59,6 +59,8 @@
     "example:install": "cd example-app && npm install",
     "example:build": "bun run build && cd example-app && bun install && bun run build && bun ../scripts/maestro/sync-cordova-config.mjs && npx cordova prepare",
     "native:contract:android": "cd android && ./gradlew testDebugUnitTest --tests app.capgo.cordova.updater.NativeContractTest && cd ..",
+    "native:contract:crypto:android": "cd android && ./gradlew testDebugUnitTest --tests app.capgo.cordova.updater.RsaContractTest && cd ..",
+    "native:contract:crypto:ios": "./scripts/test-ios.sh -only-testing:CordovaUpdaterPluginTests/RsaContractTests",
     "test": "bun run test:android && bun run test:ios",
     "test:android": "cd android && ./gradlew test && cd ..",
     "check:wiring": "node scripts/check-cordova-plugin-wiring.mjs",

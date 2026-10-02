@@ -245,6 +245,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
 
     private volatile Thread backgroundDownloadTask;
     private final Object readyGuardLock = new Object();
+    private Object readyGenerationScriptHandle;
     private volatile int readyGeneration = 0;
     private volatile boolean readyGuardArmed = false;
     private volatile Thread appReadyCheck;
@@ -714,6 +715,11 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                 }
 
                 @Override
+                public void backgroundDownloadSettled(final BundleInfo bundle, final String status) {
+                    CordovaUpdaterPlugin.this.emitLaunchDownloadReady(bundle, status);
+                }
+
+                @Override
                 public void notifyListeners(final String id, final Map<String, Object> res) {
                     if (activity != null) {
                         activity.runOnUiThread(() -> {
@@ -755,6 +761,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         CryptoCipher.setLogger(logger);
         DownloadService.setLogger(logger);
         DownloadWorkerManager.setLogger(logger);
+        DownloadService.setAllowHttpsToHttpRedirect(this.updaterConfig.getBoolean("allowHttpsToHttpRedirect", false));
 
         this.implementation.appId = InternalUtils.getPackageName(getContext().getPackageManager(), getContext().getPackageName());
         this.implementation.appId = updaterConfig.getString("appId", this.implementation.appId);
@@ -2004,6 +2011,24 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         this.logger = logger;
     }
 
+    void emitLaunchDownloadReady(final BundleInfo bundle, final String status) {
+        final BundleInfo readyBundle = bundle != null ? bundle : this.implementation.getCurrentBundle();
+        if (readyBundle == null) {
+            return;
+        }
+        this.endBackGroundTaskWithNotif(
+            status,
+            readyBundle.getVersionName(),
+            readyBundle,
+            false,
+            false,
+            "download_fail",
+            "downloadFailed",
+            false,
+            false
+        );
+    }
+
     void completeBackgroundTaskForTesting(final BundleInfo current, final boolean plannedDirectUpdate) {
         this.endBackGroundTaskWithNotif("test", current.getVersionName(), current, false, plannedDirectUpdate);
     }
@@ -2553,6 +2578,10 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             logger.error("Public key present but no valid session key provided");
             this.implementation.sendStats("session_key_required");
             throw new IOException("Session key required when public key is present");
+        }
+        if (manifest != null && manifest.length() == 0) {
+            logger.error("Empty manifest provided");
+            throw new IOException("Manifest cannot be empty");
         }
         if (manifest == null && (checksum == null || checksum.isEmpty())) {
             logger.error("No checksum provided");
@@ -4095,8 +4124,10 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
 
     private int armReadyGuard() {
         synchronized (this.readyGuardLock) {
-            this.readyGeneration = this.readyGeneration + 1;
-            this.readyGuardArmed = true;
+            if (!this.readyGuardArmed) {
+                this.readyGeneration = this.readyGeneration + 1;
+                this.readyGuardArmed = true;
+            }
             return this.readyGeneration;
         }
     }
@@ -4133,7 +4164,15 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                 return false;
             }
             final Class<?> webViewCompat = Class.forName("androidx.webkit.WebViewCompat");
-            webViewCompat
+            if (this.readyGenerationScriptHandle != null) {
+                try {
+                    this.readyGenerationScriptHandle.getClass().getMethod("remove").invoke(this.readyGenerationScriptHandle);
+                } catch (final Exception removeError) {
+                    logger.warn("Unable to remove previous notifyAppReady generation script: " + removeError.getMessage());
+                }
+                this.readyGenerationScriptHandle = null;
+            }
+            this.readyGenerationScriptHandle = webViewCompat
                 .getMethod("addDocumentStartJavaScript", android.webkit.WebView.class, String.class, Set.class)
                 .invoke(null, webView, readyGenerationScript(generation), java.util.Collections.singleton("*"));
             return true;

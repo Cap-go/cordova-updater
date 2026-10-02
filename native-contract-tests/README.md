@@ -12,10 +12,10 @@ updater state decisions.
 
 Current runners:
 
-- Android: `android/src/test/java/ee/forgr/capacitor_updater/NativeContractTest.java`
-- iOS: `ios/Tests/CapacitorUpdaterPluginTests/NativeContractTests.swift`
-- Android: `android/src/test/java/ee/forgr/capacitor_updater/RsaContractTest.java`
-- iOS: `ios/Tests/CapacitorUpdaterPluginTests/RsaContractTests.swift`
+- Android: `src/android/test/app/capgo/cordova/updater/NativeContractTest.java`
+- iOS: `ios/Tests/CordovaUpdaterPluginTests/NativeContractTests.swift`
+- Android RSA: `src/android/test/app/capgo/cordova/updater/RsaContractTest.java`
+- iOS RSA: `ios/Tests/CordovaUpdaterPluginTests/RsaContractTests.swift`
 
 RSA public-decrypt fixtures live in `native-contract-tests/crypto-rsa.json`.
 Regenerate them with:

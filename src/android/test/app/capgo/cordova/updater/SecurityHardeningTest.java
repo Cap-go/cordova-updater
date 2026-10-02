@@ -6,13 +6,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-
-import android.content.SharedPreferences;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -81,24 +75,28 @@ public class SecurityHardeningTest {
     @Test
     public void resolveBundleDirectoryRejectsAbsolutePath() throws Exception {
         final Path tempDir = Files.createTempDirectory("capgo-delete-abs");
+        tempDir.toFile().deleteOnExit();
         assertThrows(IOException.class, () -> CapgoUpdater.resolveBundleDirectory(tempDir.toFile(), "/tmp/evil"));
     }
 
     @Test
     public void resolveBundleDirectoryRejectsPathTraversal() throws Exception {
         final Path tempDir = Files.createTempDirectory("capgo-delete-traversal");
+        tempDir.toFile().deleteOnExit();
         assertThrows(IOException.class, () -> CapgoUpdater.resolveBundleDirectory(tempDir.toFile(), "../outside-target"));
     }
 
     @Test
     public void resolveBundleDirectoryRejectsDotAsBundleRoot() throws Exception {
         final Path tempDir = Files.createTempDirectory("capgo-delete-dot");
+        tempDir.toFile().deleteOnExit();
         assertThrows(IOException.class, () -> CapgoUpdater.resolveBundleDirectory(tempDir.toFile(), "."));
     }
 
     @Test
     public void deleteRejectsDotBundleId() throws Exception {
         final Path tempDir = Files.createTempDirectory("capgo-delete-dot-id");
+        tempDir.toFile().deleteOnExit();
         final CapgoUpdater updater = new CapgoUpdater(mock(Logger.class));
         updater.documentsDir = tempDir.toFile();
 
@@ -108,27 +106,20 @@ public class SecurityHardeningTest {
     @Test
     public void resolveBundleDirectoryRejectsWindowsSeparators() throws Exception {
         final Path tempDir = Files.createTempDirectory("capgo-delete-windows");
+        tempDir.toFile().deleteOnExit();
         assertThrows(IOException.class, () -> CapgoUpdater.resolveBundleDirectory(tempDir.toFile(), "..\\outside-target"));
     }
 
     @Test
     public void deleteRejectsPathTraversalOutsideBundleRoot() throws Exception {
         final Path tempDir = Files.createTempDirectory("capgo-delete-escape");
+        tempDir.toFile().deleteOnExit();
         final Path outsideTarget = tempDir.resolve("outside-target");
         Files.createDirectories(outsideTarget);
         Files.write(outsideTarget.resolve("marker.txt"), "keep".getBytes(StandardCharsets.UTF_8));
 
         final CapgoUpdater updater = new CapgoUpdater(mock(Logger.class));
         updater.documentsDir = tempDir.toFile();
-        updater.CAP_SERVER_PATH = "server-path";
-        updater.prefs = mock(SharedPreferences.class);
-        updater.editor = mock(SharedPreferences.Editor.class);
-        updater.statsUrl = "";
-
-        when(updater.prefs.getString(eq("server-path"), anyString())).thenReturn("public");
-        when(updater.prefs.getString(eq("pastVersion"), anyString())).thenReturn(BundleInfo.ID_BUILTIN);
-        when(updater.prefs.getString(eq("nextVersion"), isNull())).thenReturn(null);
-        when(updater.prefs.getString(eq("previewFallbackVersion"), isNull())).thenReturn(null);
 
         assertFalse(Boolean.TRUE.equals(updater.delete("../outside-target", true)));
         assertTrue("Path outside bundle root must remain untouched", Files.exists(outsideTarget.resolve("marker.txt")));
@@ -137,6 +128,7 @@ public class SecurityHardeningTest {
     @Test
     public void deleteRejectsAbsolutePathId() throws Exception {
         final Path tempDir = Files.createTempDirectory("capgo-delete-abs-id");
+        tempDir.toFile().deleteOnExit();
         final CapgoUpdater updater = new CapgoUpdater(mock(Logger.class));
         updater.documentsDir = tempDir.toFile();
 
@@ -146,6 +138,7 @@ public class SecurityHardeningTest {
     @Test
     public void decryptAesFileRejectsNullKeyWithoutNpe() throws Exception {
         final Path dir = Files.createTempDirectory("capgo-aes-null-key");
+        dir.toFile().deleteOnExit();
         File file = dir.resolve("cipher.bin").toFile();
         byte[] iv = new byte[16];
         Files.write(file.toPath(), new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 });
@@ -162,6 +155,7 @@ public class SecurityHardeningTest {
     @Test
     public void decryptAesFileRejectsBadKeyWithoutNpe() throws Exception {
         final Path dir = Files.createTempDirectory("capgo-aes-bad-key");
+        dir.toFile().deleteOnExit();
         File file = dir.resolve("cipher.bin").toFile();
         byte[] iv = new byte[16];
         byte[] keyBytes = new byte[16];
@@ -196,8 +190,8 @@ public class SecurityHardeningTest {
         try {
             CryptoCipher.decryptAES(new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 }, key, iv);
             fail("expected AES decrypt failure");
-        } catch (java.security.GeneralSecurityException e) {
-            assertTrue(e.getMessage() != null);
+        } catch (javax.crypto.BadPaddingException expected) {
+            // expected decrypt failure
         }
     }
 }

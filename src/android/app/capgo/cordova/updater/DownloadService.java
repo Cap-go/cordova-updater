@@ -52,7 +52,7 @@ import org.json.JSONObject;
 public class DownloadService extends Worker {
 
     /** A refused HTTPS to HTTP redirect. Permanent for the given URL, so downloads must not retry it. */
-    static final class BlockedRedirectException extends IOException {
+    static final class BlockedRedirectException extends RuntimeException {
 
         BlockedRedirectException() {
             super("Blocked HTTPS to HTTP redirect; set allowHttpsToHttpRedirect to true to allow it");
@@ -1032,8 +1032,16 @@ public class DownloadService extends Worker {
         long fileLen = tempFile.length();
         if (responseCode == HttpURLConnection.HTTP_PARTIAL) {
             ContentRangeInfo range = parseContentRange(contentRangeHeader);
-            if (range == null || range.total < 0) {
+            if (range == null) {
                 throw new DownloadRetryException("unknown_content_range_total");
+            }
+            if (range.total < 0) {
+                long advertisedSpan = range.end - range.start + 1;
+                long receivedSpan = fileLen - writeOffset;
+                if (receivedSpan != advertisedSpan) {
+                    throw new DownloadRetryException("incomplete_content_range");
+                }
+                return;
             }
             if (range.start != writeOffset) {
                 throw new DownloadRetryException("content_range_mismatch");
@@ -1060,7 +1068,7 @@ public class DownloadService extends Worker {
                 return new ZipWritePlan(HttpURLConnection.HTTP_PARTIAL, downloadedBytes);
             }
             if (rangeStart == 0) {
-                return new ZipWritePlan(HttpURLConnection.HTTP_OK, 0);
+                return new ZipWritePlan(HttpURLConnection.HTTP_PARTIAL, 0);
             }
             throw new DownloadRetryException("invalid_content_range");
         }
@@ -1184,6 +1192,12 @@ public class DownloadService extends Worker {
                         throw new IOException("Response body is null");
                     }
                     try {
+                        if (code == HttpURLConnection.HTTP_PARTIAL && existing > 0) {
+                            ContentRangeInfo range = parseContentRange(response.header("Content-Range"));
+                            if (range == null || range.start != existing) {
+                                throw new IOException("Content-Range does not match resume offset");
+                            }
+                        }
                         writeHttpBody(partial, responseBody.byteStream(), code, existing);
                         keepPartial = true;
                     } catch (Exception e) {
@@ -1228,7 +1242,6 @@ public class DownloadService extends Worker {
                 throw e;
             }
 
-            CryptoCipher.logChecksumInfo("Calculated checksum", expectedHash);
             CryptoCipher.logChecksumInfo("Expected checksum", expectedHash);
 
             if (cacheFile != null) {

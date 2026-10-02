@@ -227,7 +227,7 @@ public class CryptoCipher {
             }
             replaceFile(tempFile, file);
             tempFile = null;
-        } catch (GeneralSecurityException e) {
+        } catch (GeneralSecurityException | IllegalArgumentException e) {
             throw new IOException("AES file decryption failed: " + e.getMessage(), e);
         } finally {
             if (tempFile != null && tempFile.exists()) {
