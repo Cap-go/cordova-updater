@@ -31,7 +31,7 @@ def main() -> int:
     for name in ("LICENSE", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md"):
         shutil.copy2(SOURCE / name, TARGET / name)
 
-    for d in (".github", ".maestro", "native-contract-tests"):
+    for d in (".maestro", "native-contract-tests"):
         dst = TARGET / d
         if dst.exists():
             shutil.rmtree(dst)
