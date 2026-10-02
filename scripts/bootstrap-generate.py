@@ -41,6 +41,8 @@ def main() -> int:
     for item in (SOURCE / "scripts").iterdir():
         if item.name in {"bootstrap.sh", "bootstrap-generate.py"}:
             continue
+        if item.name == "check-capacitor-plugin-wiring.mjs":
+            continue
         dst = scripts_dst / item.name
         if item.is_dir():
             if dst.exists():

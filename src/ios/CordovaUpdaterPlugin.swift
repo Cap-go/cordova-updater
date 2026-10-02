@@ -2898,7 +2898,11 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         self.saveCallForAsyncHandling(call)
         DispatchQueue.global(qos: .utility).async {
             let configDefaultChannel = self.readConfigString("defaultChannel", "")!
-            let res = self.implementation.unsetChannel(defaultChannelKey: self.defaultChannelDefaultsKey, configDefaultChannel: configDefaultChannel)
+            let res = self.implementation.unsetChannel(
+                defaultChannelKey: self.defaultChannelDefaultsKey,
+                configDefaultChannel: configDefaultChannel,
+                allowSetDefaultChannel: self.allowSetDefaultChannel
+            )
             if res.error != "" {
                 self.rejectCall(call, message: res.error, code: "UNSETCHANNEL_FAILED", data: [
                     "message": res.error,
