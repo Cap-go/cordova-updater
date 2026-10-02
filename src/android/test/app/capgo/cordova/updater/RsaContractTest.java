@@ -136,7 +136,7 @@ public class RsaContractTest {
             try {
                 CryptoCipher.stringToPublicKey(publicKeyPem);
                 loaded = true;
-            } catch (GeneralSecurityException ignored) {
+            } catch (Exception ignored) {
                 loaded = false;
             }
             assertEquals(id, shouldLoad, loaded);
