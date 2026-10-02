@@ -20,7 +20,7 @@ function parseArgs(argv) {
 }
 
 function git(args) {
-  return execFileSync('git', args, { encoding: 'utf8' }).trim();
+  return execFileSync('/usr/bin/git', args, { encoding: 'utf8' }).trim();
 }
 
 function resolveTags({ fromTag, toTag }) {
@@ -32,23 +32,8 @@ function resolveTags({ fromTag, toTag }) {
     throw new Error('Missing target tag. Set GITHUB_REF to refs/tags/<tag> or pass --to-tag.');
   }
 
-  if (fromTag) {
-    return { previousTag: fromTag, currentTag };
-  }
-
-  const major = currentTag.match(/^v?(\d+)/)?.[1];
-  const describeArgs = ['describe', '--tags', '--abbrev=0'];
-  if (major) {
-    try {
-      return {
-        previousTag: git([...describeArgs, `--match=${major}.*`, `--match=v${major}.*`, `${currentTag}^`]),
-        currentTag,
-      };
-    } catch {
-      // First release of a new major has no same-major predecessor.
-    }
-  }
-  return { previousTag: git([...describeArgs, `${currentTag}^`]), currentTag };
+  const previousTag = fromTag ?? git(['describe', '--tags', '--abbrev=0', `${currentTag}^`]);
+  return { previousTag, currentTag };
 }
 
 function buildPrompt(previousTag, currentTag) {
@@ -97,10 +82,6 @@ async function generateChangelog(prompt, model) {
     throw new Error('CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are required.');
   }
 
-  const configuredTimeoutMs = Number(process.env.CHANGELOG_AI_TIMEOUT_MS || 60000);
-  const timeoutMs = Number.isFinite(configuredTimeoutMs)
-    ? Math.min(600000, Math.max(1000, Math.trunc(configuredTimeoutMs)))
-    : 60000;
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`;
   const response = await fetch(url, {
     method: 'POST',
@@ -111,7 +92,6 @@ async function generateChangelog(prompt, model) {
     body: JSON.stringify({
       messages: [{ role: 'user', content: prompt }],
     }),
-    signal: AbortSignal.timeout(timeoutMs),
   });
 
   const payload = await response.json();
@@ -131,16 +111,10 @@ function writeGithubOutput({ result, fromTag, toTag }) {
   const outputFile = process.env.GITHUB_OUTPUT;
   if (!outputFile) return;
 
-  if (fromTag) {
-    appendFileSync(outputFile, `from_tag=${fromTag}\n`);
-  }
-  if (toTag) {
-    appendFileSync(outputFile, `to_tag=${toTag}\n`);
-  }
-  if (result) {
-    const delimiter = `changelog_${Date.now()}`;
-    appendFileSync(outputFile, `result<<${delimiter}\n${result}\n${delimiter}\n`);
-  }
+  const delimiter = `changelog_${Date.now()}`;
+  appendFileSync(outputFile, `result<<${delimiter}\n${result}\n${delimiter}\n`);
+  appendFileSync(outputFile, `from_tag=${fromTag}\n`);
+  appendFileSync(outputFile, `to_tag=${toTag}\n`);
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -150,11 +124,10 @@ const prompt = buildPrompt(previousTag, currentTag);
 
 console.error(`Generating changelog with ${model}`);
 console.error(`Range: ${previousTag}..${currentTag}`);
-writeGithubOutput({ fromTag: previousTag, toTag: currentTag });
 
 try {
   const result = await generateChangelog(prompt, model);
-  writeGithubOutput({ result });
+  writeGithubOutput({ result, fromTag: previousTag, toTag: currentTag });
 } catch (error) {
   const message = error instanceof Error ? error.message : 'Unknown error';
   console.error(`Changelog generation failed: ${message}`);

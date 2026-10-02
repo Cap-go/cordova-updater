@@ -1,15 +1,15 @@
 appId: app.capgo.updater
 ---
 - extendedWaitUntil:
-    visible: '@capgo/capacitor-updater'
+    visible: '@capgo/cordova-updater'
     timeout: 180000
-- assertVisible: '@capgo/capacitor-updater'
+- assertVisible: '@capgo/cordova-updater'
 - extendedWaitUntil:
     visible: '.*Harness: ready.*'
     timeout: 120000
 - scrollUntilVisible:
     element:
-      text: '@capgo/capacitor-updater'
+      text: '@capgo/cordova-updater'
     direction: UP
     timeout: 120000
 - scrollUntilVisible:
@@ -68,7 +68,7 @@ appId: app.capgo.updater
     timeout: 30000
 - scrollUntilVisible:
     element:
-      text: '@capgo/capacitor-updater'
+      text: '@capgo/cordova-updater'
     direction: UP
     timeout: 120000
 - scrollUntilVisible:
@@ -82,11 +82,11 @@ appId: app.capgo.updater
     id: 'quick-action-set-last-downloaded-bundle'
     waitToSettleTimeoutMs: 500
 - extendedWaitUntil:
-    visible: '@capgo/capacitor-updater'
+    visible: '@capgo/cordova-updater'
     timeout: 180000
 - scrollUntilVisible:
     element:
-      text: '@capgo/capacitor-updater'
+      text: '@capgo/cordova-updater'
     direction: UP
     timeout: 120000
 - assertVisible: '.*Current bundle source: downloaded.*'
@@ -135,7 +135,7 @@ appId: app.capgo.updater
     timeout: 30000
 - scrollUntilVisible:
     element:
-      text: '@capgo/capacitor-updater'
+      text: '@capgo/cordova-updater'
     direction: UP
     timeout: 120000
 - scrollUntilVisible:
@@ -153,7 +153,7 @@ appId: app.capgo.updater
     timeout: 30000
 - scrollUntilVisible:
     element:
-      text: '@capgo/capacitor-updater'
+      text: '@capgo/cordova-updater'
     direction: UP
     timeout: 120000
 - assertVisible: '.*Next bundle version: manual-zip-v2.*'
@@ -194,11 +194,11 @@ appId: app.capgo.updater
     id: 'quick-action-reload-app'
     waitToSettleTimeoutMs: 500
 - extendedWaitUntil:
-    visible: '@capgo/capacitor-updater'
+    visible: '@capgo/cordova-updater'
     timeout: 180000
 - scrollUntilVisible:
     element:
-      text: '@capgo/capacitor-updater'
+      text: '@capgo/cordova-updater'
     direction: UP
     timeout: 120000
 - assertVisible: '.*Current bundle source: downloaded.*'
@@ -259,11 +259,11 @@ appId: app.capgo.updater
     id: 'quick-action-set-last-downloaded-bundle'
     waitToSettleTimeoutMs: 500
 - extendedWaitUntil:
-    visible: '@capgo/capacitor-updater'
+    visible: '@capgo/cordova-updater'
     timeout: 180000
 - scrollUntilVisible:
     element:
-      text: '@capgo/capacitor-updater'
+      text: '@capgo/cordova-updater'
     direction: UP
     timeout: 120000
 - extendedWaitUntil:
@@ -293,12 +293,12 @@ appId: app.capgo.updater
     timeout: 30000
 - scrollUntilVisible:
     element:
-      text: '@capgo/capacitor-updater'
+      text: '@capgo/cordova-updater'
     direction: UP
     timeout: 120000
 - scrollUntilVisible:
     element:
-      text: '@capgo/capacitor-updater'
+      text: '@capgo/cordova-updater'
     direction: UP
     timeout: 120000
 - assertVisible: '.*Failed update: manual-zip-v3-broken.*'
@@ -371,11 +371,11 @@ appId: app.capgo.updater
     id: 'quick-action-reset-to-builtin'
     waitToSettleTimeoutMs: 500
 - extendedWaitUntil:
-    visible: '@capgo/capacitor-updater'
+    visible: '@capgo/cordova-updater'
     timeout: 180000
 - scrollUntilVisible:
     element:
-      text: '@capgo/capacitor-updater'
+      text: '@capgo/cordova-updater'
     direction: UP
     timeout: 120000
 - assertVisible: '.*Current bundle source: builtin.*'
