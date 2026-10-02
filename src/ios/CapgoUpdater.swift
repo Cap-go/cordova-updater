@@ -5,8 +5,6 @@
  */
 
 import Foundation
-import ZIPFoundation
-import Alamofire
 import Compression
 import UIKit
 
@@ -74,10 +72,11 @@ import UIKit
     private var statsQueue: [QueuedStatsEvent] = []
     private var statsInFlight: [QueuedStatsEvent] = []
     private let statsQueueLock = NSLock()
-    private let statsPersistLock = NSLock()
     private let statsStateLock = NSLock()
+    private let statsPersistLock = NSLock()
     private var statsFlushTimer: Timer?
     private var _statsStopped = false
+
     private var statsStopped: Bool {
         get {
             statsStateLock.lock()
@@ -133,7 +132,7 @@ import UIKit
         let timedOut: Bool
     }
 
-    private struct DownloadRequestResult {
+    struct DownloadRequestResult {
         let fileURL: URL?
         let response: HTTPURLResponse?
         let error: Error?
@@ -147,6 +146,10 @@ import UIKit
         case pathTraversal
     }
 
+    static func containsPathTraversalSegment(_ relativePath: String) -> Bool {
+        return relativePath.split(separator: "/").contains(where: { $0 == ".." })
+    }
+
     static func resolvePathInsideDirectory(baseDirectory: URL, relativePath: String) throws -> URL {
         if relativePath.isEmpty {
             throw SecurePathError.emptyPath
@@ -154,21 +157,35 @@ import UIKit
         if relativePath.contains("\\") || relativePath.contains("\0") {
             throw SecurePathError.windowsPath
         }
+        if containsPathTraversalSegment(relativePath) {
+            throw SecurePathError.pathTraversal
+        }
         if (relativePath as NSString).isAbsolutePath {
             throw SecurePathError.absolutePath
         }
 
-        let canonicalBase = baseDirectory.standardizedFileURL
+        let canonicalBase = baseDirectory.standardizedFileURL.resolvingSymlinksInPath()
         let canonicalBasePath = canonicalBase.path
         let normalizedBasePath = canonicalBasePath.hasSuffix("/") ? canonicalBasePath : "\(canonicalBasePath)/"
-        let canonicalTarget = canonicalBase.appendingPathComponent(relativePath).standardizedFileURL
-        let canonicalTargetPath = canonicalTarget.path
+        let targetURL = canonicalBase.appendingPathComponent(relativePath, isDirectory: false).standardizedFileURL
+        let canonicalTargetPath: String
+        if FileManager.default.fileExists(atPath: targetURL.path) {
+            canonicalTargetPath = targetURL.resolvingSymlinksInPath().path
+        } else {
+            canonicalTargetPath = targetURL.path
+        }
 
-        if canonicalTargetPath != canonicalBasePath && !canonicalTargetPath.hasPrefix(normalizedBasePath) {
+        // Require a strict child of the base. Equality would accept "." and wipe/write the root.
+        if !canonicalTargetPath.hasPrefix(normalizedBasePath) {
             throw SecurePathError.pathTraversal
         }
 
-        return canonicalTarget
+        return URL(fileURLWithPath: canonicalTargetPath, isDirectory: false)
+    }
+
+    static func resolveBundleDirectory(libraryDir: URL, bundleId: String) throws -> URL {
+        let bundleRoot = libraryDir.appendingPathComponent("NoCloud/ionic_built_snapshots")
+        return try resolvePathInsideDirectory(baseDirectory: bundleRoot, relativePath: bundleId)
     }
 
     static func resolveManifestTargetPath(baseDirectory: URL, fileName: String) throws -> URL {
@@ -177,7 +194,26 @@ import UIKit
         return try resolvePathInsideDirectory(baseDirectory: baseDirectory, relativePath: targetFileName)
     }
 
+    static func rememberManifestTarget(_ seenTargets: inout Set<String>, targetFile: URL) -> Bool {
+        return seenTargets.insert(targetFile.standardizedFileURL.path).inserted
+    }
+
+    private struct ManifestDownloadTask {
+        let fileName: String
+        let downloadUrl: String
+        let finalFileHash: String
+        let isBrotli: Bool
+        let destFileName: String
+        let destFilePath: URL
+        let builtinFilePath: URL
+        let cacheFilePath: URL?
+        let legacyCacheFilePath: URL?
+    }
+
     private func isTimedOutError(_ error: Error?) -> Bool {
+        if case let .sessionTaskFailed(underlying)? = error as? NetworkError {
+            return isTimedOutError(underlying)
+        }
         guard let nsError = error as NSError? else {
             return false
         }
@@ -185,7 +221,51 @@ import UIKit
         return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorTimedOut
     }
 
-    private lazy var alamofireSession: Session = {
+    /// Errors produced by the URLSession transport. Descriptions intentionally match the messages the
+    /// previous Alamofire transport surfaced so logs and JS-facing error strings stay the same.
+    enum NetworkError: LocalizedError {
+        case sessionTaskFailed(Error)
+        case emptyResponse
+        case invalidURL(String)
+        case bodyEncodingFailed(Error?)
+        case downloadedFileMoveFailed(Error, source: URL, destination: URL)
+
+        var errorDescription: String? {
+            switch self {
+            case let .sessionTaskFailed(error):
+                return "URLSessionTask failed with error: \(error.localizedDescription)"
+            case .emptyResponse:
+                return "Response could not be serialized, input data was nil or zero length."
+            case let .invalidURL(url):
+                return "URL is not valid: \(url)"
+            case let .bodyEncodingFailed(error):
+                return "JSON could not be encoded because of error:\n\(error?.localizedDescription ?? "Invalid JSON object provided for parameter or object encoding.")"
+            case let .downloadedFileMoveFailed(error, source, destination):
+                return "Moving downloaded file from: \(source) to: \(destination) failed with error: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Mirrors Alamofire's `responseData` serializer: an empty body is an error unless the status allows it.
+    static func emptyResponseError(data: Data?, response: HTTPURLResponse?, method: String?) -> Error? {
+        if let data, !data.isEmpty {
+            return nil
+        }
+        if method?.uppercased() == "HEAD" || [204, 205].contains(response?.statusCode ?? 0) {
+            return nil
+        }
+        return NetworkError.emptyResponse
+    }
+
+    // lazy var is not thread-safe; concurrent manifest downloads can race first access when statsUrl is empty.
+    private var cachedUrlSession: URLSession?
+    private let urlSessionLock = NSLock()
+    private var urlSession: URLSession {
+        urlSessionLock.lock()
+        defer { urlSessionLock.unlock() }
+        if let session = cachedUrlSession {
+            return session
+        }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpAdditionalHeaders = ["User-Agent": self.userAgent]
         configuration.httpCookieStorage = nil
@@ -193,8 +273,84 @@ import UIKit
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.urlCache = nil
         configuration.httpMaximumConnectionsPerHost = Self.manifestMaxConcurrentFiles
-        return Session(configuration: configuration)
-    }()
+        redirectPolicy.onBlockedRedirect = { [weak self] source, target in
+            self?.logger?.error("Blocked HTTPS to HTTP redirect; set allowHttpsToHttpRedirect to true to allow it")
+            self?.logger?.debug("Redirect from \(source?.absoluteString ?? "") to \(target?.absoluteString ?? "")")
+        }
+        let session = URLSession(configuration: configuration, delegate: redirectPolicy, delegateQueue: nil)
+        cachedUrlSession = session
+        return session
+    }
+
+    /// Owned separately from `CapgoUpdater` because URLSession retains its delegate strongly.
+    private let redirectPolicy = RedirectPolicyDelegate()
+
+    /// Follow redirects from HTTPS to plain HTTP. Off by default so a redirect can never downgrade updater traffic.
+    public var allowHttpsToHttpRedirect: Bool {
+        get { redirectPolicy.allowHttpsToHttpRedirect }
+        set { redirectPolicy.allowHttpsToHttpRedirect = newValue }
+    }
+
+    /// Runs a data task and reports `(data, response, error)` like Alamofire's `responseData` did:
+    /// `data` is nil when no bytes were received, transport errors are wrapped, and an empty body is an error
+    /// unless the status code is 204/205 (or the request is HEAD).
+    @discardableResult
+    private func startDataTask(
+        _ request: URLRequest,
+        completionQueue: DispatchQueue,
+        completion: @escaping (Data?, HTTPURLResponse?, Error?) -> Void
+    ) -> URLSessionDataTask {
+        let task = self.urlSession.dataTask(with: request) { data, response, error in
+            let httpResponse = response as? HTTPURLResponse
+            let body = (data?.isEmpty ?? true) ? nil : data
+            let resultError: Error?
+            if let error {
+                resultError = NetworkError.sessionTaskFailed(error)
+            } else {
+                resultError = Self.emptyResponseError(data: body, response: httpResponse, method: request.httpMethod)
+            }
+            completionQueue.async {
+                completion(body, httpResponse, resultError)
+            }
+        }
+        task.resume()
+        return task
+    }
+
+    /// Builds a POST request with a JSON body (same headers as Alamofire's JSON encoders).
+    func makeJSONPostRequest(urlString: String, body: () throws -> Data) -> Result<URLRequest, Error> {
+        guard let url = URL(string: urlString) else {
+            return .failure(NetworkError.invalidURL(urlString))
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = self.timeout
+        do {
+            request.httpBody = try body()
+        } catch let error as NetworkError {
+            return .failure(error)
+        } catch {
+            return .failure(NetworkError.bodyEncodingFailed(error))
+        }
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        return .success(request)
+    }
+
+    /// Fire-and-forget JSON POST whose completion runs on the main queue, like Alamofire's default `responseData`.
+    private func sendJSONPost(
+        urlString: String,
+        body: () throws -> Data,
+        completion: @escaping (Data?, HTTPURLResponse?, Error?) -> Void
+    ) {
+        switch makeJSONPostRequest(urlString: urlString, body: body) {
+        case let .success(request):
+            self.startDataTask(request, completionQueue: .main, completion: completion)
+        case let .failure(error):
+            DispatchQueue.main.async {
+                completion(nil, nil, error)
+            }
+        }
+    }
     private let networkResponseQueue = DispatchQueue(label: "ee.forgr.capacitor-updater.network-response", qos: .utility)
 
     public var notifyDownloadRaw: (String, Int, Bool, BundleInfo?) -> Void = { _, _, _, _  in }
@@ -252,43 +408,69 @@ import UIKit
         var responseData: Data?
         var httpResponse: HTTPURLResponse?
         var requestError: Error?
-        let dataRequest = self.alamofireSession.request(request).responseData(queue: self.networkResponseQueue) { response in
-            responseData = response.data
-            httpResponse = response.response
-            requestError = response.error
+        let dataTask = self.startDataTask(request, completionQueue: self.networkResponseQueue) { data, response, error in
+            responseData = data
+            httpResponse = response
+            requestError = error
             semaphore.signal()
         }
-        dataRequest.resume()
 
         if semaphore.wait(timeout: .now() + waitTimeout) == .timedOut {
-            dataRequest.cancel()
+            dataTask.cancel()
             logger.error("\(label) timed out after \(Int(waitTimeout))s")
             return RequestResult(data: responseData, response: httpResponse, error: requestError, timedOut: true)
         }
 
-        return RequestResult(data: responseData, response: httpResponse, error: requestError, timedOut: false)
+        // URLSession can report its own timeout (NSURLErrorTimedOut) before the semaphore deadline.
+        let timedOut = isTimedOutError(requestError)
+        if timedOut {
+            logger.error("\(label) timed out after \(Int(request.timeoutInterval))s")
+        }
+        return RequestResult(data: responseData, response: httpResponse, error: requestError, timedOut: timedOut)
     }
 
-    private func performDownloadRequest(_ request: URLRequest, label: String) -> DownloadRequestResult {
+    func performDownloadRequest(_ request: URLRequest, label: String) -> DownloadRequestResult {
         let waitTimeout = max(self.timeout + 5, 10)
         let semaphore = DispatchSemaphore(value: 0)
         var tempFileURL: URL?
         var httpResponse: HTTPURLResponse?
         var requestError: Error?
         let temporaryDownloadURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let destination: DownloadRequest.Destination = { _, _ in
-            (temporaryDownloadURL, [.removePreviousFile, .createIntermediateDirectories])
+        let downloadTask = self.urlSession.downloadTask(with: request) { location, response, error in
+            // URLSession deletes `location` once this handler returns, so move it synchronously here.
+            var movedFileURL: URL?
+            var resultError: Error?
+            if let error {
+                resultError = NetworkError.sessionTaskFailed(error)
+            } else if let location {
+                do {
+                    let fileManager = FileManager.default
+                    try fileManager.createDirectory(
+                        at: temporaryDownloadURL.deletingLastPathComponent(),
+                        withIntermediateDirectories: true,
+                        attributes: nil
+                    )
+                    if fileManager.fileExists(atPath: temporaryDownloadURL.path) {
+                        try fileManager.removeItem(at: temporaryDownloadURL)
+                    }
+                    try fileManager.moveItem(at: location, to: temporaryDownloadURL)
+                    movedFileURL = temporaryDownloadURL
+                } catch {
+                    resultError = NetworkError.downloadedFileMoveFailed(error, source: location, destination: temporaryDownloadURL)
+                }
+            }
+            let taskResponse = response as? HTTPURLResponse
+            self.networkResponseQueue.async {
+                tempFileURL = movedFileURL
+                httpResponse = taskResponse
+                requestError = resultError
+                semaphore.signal()
+            }
         }
-        let downloadRequest = self.alamofireSession.download(request, to: destination).response(queue: self.networkResponseQueue) { response in
-            tempFileURL = response.fileURL
-            httpResponse = response.response
-            requestError = response.error
-            semaphore.signal()
-        }
-        downloadRequest.resume()
+        downloadTask.resume()
 
         if semaphore.wait(timeout: .now() + waitTimeout) == .timedOut {
-            downloadRequest.cancel()
+            downloadTask.cancel()
             logger.error("\(label) timed out after \(Int(waitTimeout))s")
             return DownloadRequestResult(
                 fileURL: existingDownloadFileURL(tempFileURL, fallback: temporaryDownloadURL),
@@ -415,10 +597,14 @@ import UIKit
 
     deinit {
         shutdown()
+        // Alamofire's Session invalidated its URLSession on deinit; keep releasing the session the same way.
+        cachedUrlSession?.invalidateAndCancel()
     }
 
     public func shutdown() {
+        statsPersistLock.lock()
         statsStopped = true
+        statsPersistLock.unlock()
         statsFlushTimer?.invalidate()
         statsFlushTimer = nil
         persistStatsQueue(force: true)
@@ -431,6 +617,18 @@ import UIKit
     private func randomString(length: Int) -> String {
         let letters: String = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         return String((0..<length).map { _ in letters.randomElement()! })
+    }
+
+    private func requireSessionKeyForEncryptedUpdate(sessionKey: String, versionName: String? = nil) throws {
+        if !self.publicKey.isEmpty && !CryptoCipher.isValidSessionKey(sessionKey) {
+            logger.error("Public key present but no valid session key provided")
+            self.sendStats(action: "session_key_required", versionName: versionName)
+            throw NSError(
+                domain: "CapgoUpdater",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Session key required when public key is present"]
+            )
+        }
     }
 
     public func setPublicKey(_ publicKey: String) {
@@ -679,28 +877,27 @@ import UIKit
 
         // Send synchronously using semaphore (safe because we're on a background queue)
         let semaphore = DispatchSemaphore(value: 0)
-        self.alamofireSession.request(
-            self.statsUrl,
-            method: .post,
-            parameters: parameters.toParameters(),
-            encoding: JSONEncoding.default,
-            requestModifier: { $0.timeoutInterval = self.timeout }
-        ).responseData { response in
-            let statusCode = response.response?.statusCode
-            switch response.result {
-            case .success where (200...299).contains(statusCode ?? 0):
-                self.logger.info("Rate limit statistic sent")
-            case .success:
-                CapgoUpdater.releaseRateLimitStatisticClaim()
-                self.logger.error("Error sending rate limit statistic")
-                self.logger.debug("Response code: \(statusCode.map(String.init) ?? "nil")")
-            case let .failure(error):
+        let parameterValues = parameters.toParameters()
+        self.sendJSONPost(urlString: self.statsUrl, body: {
+            guard JSONSerialization.isValidJSONObject(parameterValues) else {
+                throw NetworkError.bodyEncodingFailed(nil)
+            }
+            return try JSONSerialization.data(withJSONObject: parameterValues)
+        }, completion: { _, response, error in
+            let statusCode = response?.statusCode
+            if let error {
                 CapgoUpdater.releaseRateLimitStatisticClaim()
                 self.logger.error("Error sending rate limit statistic")
                 self.logger.debug("Error: \(error.localizedDescription)")
+            } else if (200...299).contains(statusCode ?? 0) {
+                self.logger.info("Rate limit statistic sent")
+            } else {
+                CapgoUpdater.releaseRateLimitStatisticClaim()
+                self.logger.error("Error sending rate limit statistic")
+                self.logger.debug("Response code: \(statusCode.map(String.init) ?? "nil")")
             }
             semaphore.signal()
-        }
+        })
         semaphore.wait()
     }
 
@@ -792,7 +989,10 @@ import UIKit
         }
     }
 
-    private func extractZipEntry(_ archive: Archive, entry: Entry, to destPath: URL, bufferSize: Int = CryptoCipher.ioBufferBytes()) throws {
+    // Symlink targets are paths; anything bigger than this is not a legitimate link.
+    private static let maxZipSymlinkTargetBytes = 64 * 1024
+
+    private func extractZipEntry(_ archive: ZipArchiveReader, entry: ZipEntry, to destPath: URL, bufferSize: Int = CryptoCipher.ioBufferBytes()) throws {
         let fileManager = FileManager.default
 
         switch entry.type {
@@ -815,16 +1015,13 @@ import UIKit
                 fileHandle.closeFile()
             }
 
-            _ = try archive.extract(entry, bufferSize: bufferSize, skipCRC32: true) { data in
+            try archive.extract(entry, bufferSize: bufferSize) { data in
                 if !data.isEmpty {
                     fileHandle.write(data)
                 }
             }
         case .symlink:
-            var linkData = Data()
-            _ = try archive.extract(entry, bufferSize: bufferSize, skipCRC32: true) { data in
-                linkData.append(data)
-            }
+            let linkData = try archive.readSmallEntry(entry, maxBytes: Self.maxZipSymlinkTargetBytes, bufferSize: bufferSize)
 
             guard let linkPath = String(data: linkData, encoding: .utf8) else {
                 throw CustomError.cannotUnzip
@@ -860,9 +1057,9 @@ import UIKit
         self.notifyDownload(id: id, percent: 75)
 
         // Open the archive
-        let archive: Archive
+        let archive: ZipArchiveReader
         do {
-            archive = try Archive(url: sourceZip, accessMode: .read)
+            archive = try ZipArchiveReader(url: sourceZip)
         } catch {
             self.sendStats(action: "unzip_fail")
             throw CustomError.cannotUnzip
@@ -872,11 +1069,11 @@ import UIKit
         try FileManager.default.createDirectory(at: destUnZip, withIntermediateDirectories: true, attributes: nil)
 
         // Count total entries for progress
-        let totalEntries = archive.reduce(0) { count, _ in count + 1 }
+        let totalEntries = archive.entries.count
         var processedEntries = 0
 
         do {
-            for entry in archive {
+            for entry in archive.entries {
                 let destPath = try resolveZipEntry(path: entry.path, destUnZip: destUnZip)
 
                 if entry.type == .directory {
@@ -939,10 +1136,7 @@ import UIKit
 
     struct ManifestLookupEntry {
         let hash: String
-        /// The manifest's own file name, `.br` suffix included when present. The
-        /// built-in bundle stores files under this exact name (see
-        /// isManifestEntryAvailableLocally), unlike the extracted/cached copy which
-        /// is always named without the suffix.
+        /// The manifest's own file name, `.br` suffix included when present.
         let originalFileName: String
     }
 
@@ -967,7 +1161,13 @@ import UIKit
     /// `manifest` must only contain entries the caller already checksum-verified
     /// (as `downloadManifest` does) — the hashes are trusted as-is, not re-checked.
     func populateDeltaCache(for id: String, manifest: [ManifestEntry]? = nil, sessionKey: String = "") {
-        let bundleDir = self.getBundleDirectory(id: id)
+        let bundleDir: URL
+        do {
+            bundleDir = try self.getBundleDirectory(id: id)
+        } catch {
+            logger.debug("Skip delta cache population: invalid bundle id")
+            return
+        }
         let fileManager = FileManager.default
 
         guard fileManager.fileExists(atPath: bundleDir.path) else {
@@ -1005,10 +1205,14 @@ import UIKit
 
             // Builtin is already a permanent reuse source (see isManifestEntryAvailableLocally),
             // so there's no need to also duplicate this file into the delta cache
-            let builtinRelativePath = knownEntry?.originalFileName ?? relativePath
-            let builtinFilePath = builtinFolder.appendingPathComponent(builtinRelativePath)
-            let isBuiltinOrigin = fileManager.fileExists(atPath: builtinFilePath.path) &&
-                verifyChecksum(file: builtinFilePath, expectedHash: checksum)
+            let builtinLookupName = knownEntry?.originalFileName ?? relativePath
+            let isBuiltinOrigin: Bool
+            if let builtinFilePath = try? Self.resolveManifestTargetPath(baseDirectory: builtinFolder, fileName: builtinLookupName) {
+                isBuiltinOrigin = fileManager.fileExists(atPath: builtinFilePath.path) &&
+                    verifyChecksum(file: builtinFilePath, expectedHash: checksum)
+            } else {
+                isBuiltinOrigin = false
+            }
             if isBuiltinOrigin {
                 continue
             }
@@ -1223,7 +1427,10 @@ import UIKit
         guard var fileHash = entry.file_hash, !fileHash.isEmpty else {
             return nil
         }
-        if !self.publicKey.isEmpty && !sessionKey.isEmpty {
+        if !self.publicKey.isEmpty {
+            if !CryptoCipher.isValidSessionKey(sessionKey) {
+                return nil
+            }
             do {
                 fileHash = try CryptoCipher.decryptChecksum(checksum: fileHash, publicKey: self.publicKey)
             } catch {
@@ -1242,7 +1449,10 @@ import UIKit
         }
 
         let builtinFolder = self.builtinFolderURL()
-        let builtinFilePath = builtinFolder.appendingPathComponent(fileName)
+        // The .br suffix describes transport; builtin assets are uncompressed.
+        guard let builtinFilePath = try? Self.resolveManifestTargetPath(baseDirectory: builtinFolder, fileName: fileName) else {
+            return false
+        }
         if FileManager.default.fileExists(atPath: builtinFilePath.path) && verifyChecksum(file: builtinFilePath, expectedHash: fileHash) {
             return true
         }
@@ -1381,10 +1591,11 @@ import UIKit
     }
 
     public func downloadManifest(manifest: [ManifestEntry], version: String, sessionKey: String, link: String? = nil, comment: String? = nil) throws -> BundleInfo {
+        try self.requireSessionKeyForEncryptedUpdate(sessionKey: sessionKey, versionName: version)
         try self.runBeforeDownload()
         let id = self.randomString(length: 10)
         logger.info("downloadManifest start \(id)")
-        let destFolder = self.getBundleDirectory(id: id)
+        let destFolder = try self.getBundleDirectory(id: id)
         let builtinFolder = self.builtinFolderURL()
 
         // Check disk space before starting manifest download (estimate 100KB per file, minimum 50MB)
@@ -1413,8 +1624,8 @@ import UIKit
         var downloadError: Error?
         let errorLock = NSLock()
 
-        // Create operations for each file
-        var operations: [Operation] = []
+        var tasks: [ManifestDownloadTask] = []
+        var seenTargets = Set<String>()
 
         for entry in manifest {
             guard let fileName = entry.file_name,
@@ -1455,7 +1666,23 @@ import UIKit
             var fileHash = entryFileHash
 
             // Decrypt checksum if needed (done before creating operation)
-            if !self.publicKey.isEmpty && !sessionKey.isEmpty {
+            if !self.publicKey.isEmpty {
+                if !CryptoCipher.isValidSessionKey(sessionKey) {
+                    let error = NSError(
+                        domain: "CapgoUpdater",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Session key required when public key is present"]
+                    )
+                    self.sendStats(action: "session_key_required", versionName: version)
+                    errorLock.lock()
+                    if downloadError == nil {
+                        downloadError = error
+                    }
+                    errorLock.unlock()
+                    hasError.value = true
+                    logger.error("Public key present but no valid session key provided")
+                    continue
+                }
                 do {
                     fileHash = try CryptoCipher.decryptChecksum(checksum: fileHash, publicKey: self.publicKey)
                 } catch {
@@ -1485,7 +1712,25 @@ import UIKit
             let builtinFilePath: URL
             do {
                 destFilePath = try Self.resolveManifestTargetPath(baseDirectory: destFolder, fileName: fileName)
-                builtinFilePath = try Self.resolvePathInsideDirectory(baseDirectory: builtinFolder, relativePath: fileName)
+                builtinFilePath = try Self.resolveManifestTargetPath(baseDirectory: builtinFolder, fileName: fileName)
+                if !Self.rememberManifestTarget(&seenTargets, targetFile: destFilePath) {
+                    logger.error("Duplicate manifest target path: \(fileName)")
+                    self.sendStats(action: "manifest_path_fail", versionName: "\(version):\(fileName)")
+                    let error = NSError(
+                        domain: "ManifestEntryError",
+                        code: 3,
+                        userInfo: [
+                            NSLocalizedDescriptionKey: "Duplicate manifest target path for \(fileName)"
+                        ]
+                    )
+                    errorLock.lock()
+                    if downloadError == nil {
+                        downloadError = error
+                    }
+                    errorLock.unlock()
+                    hasError.value = true
+                    continue
+                }
             } catch {
                 logger.error("Invalid manifest file path: \(fileName)")
                 self.sendStats(action: "manifest_path_fail", versionName: "\(version):\(fileName)")
@@ -1498,8 +1743,40 @@ import UIKit
                 continue
             }
 
-            // Create parent directories synchronously (before operations start)
-            try? FileManager.default.createDirectory(at: destFilePath.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
+            tasks.append(
+                ManifestDownloadTask(
+                    fileName: fileName,
+                    downloadUrl: downloadUrl,
+                    finalFileHash: finalFileHash,
+                    isBrotli: isBrotli,
+                    destFileName: destFileName,
+                    destFilePath: destFilePath,
+                    builtinFilePath: builtinFilePath,
+                    cacheFilePath: cacheFilePath,
+                    legacyCacheFilePath: legacyCacheFilePath
+                )
+            )
+        }
+
+        if hasError.value {
+            let resolvedError = downloadError ?? NSError(
+                domain: "ManifestDownloadError",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Manifest download failed due to invalid or missing entries"]
+            )
+            let errorBundle = bundleInfo.setStatus(status: BundleStatus.ERROR.storedValue)
+            self.saveBundleInfo(id: id, bundle: errorBundle)
+            throw resolvedError
+        }
+
+        var operations: [Operation] = []
+
+        for task in tasks {
+            try FileManager.default.createDirectory(
+                at: task.destFilePath.deletingLastPathComponent(),
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
 
             let operation = BlockOperation { [weak self] in
                 guard let self = self else { return }
@@ -1507,26 +1784,29 @@ import UIKit
 
                 do {
                     // Try builtin first
-                    if FileManager.default.fileExists(atPath: builtinFilePath.path) && self.verifyChecksum(file: builtinFilePath, expectedHash: finalFileHash) {
-                        try self.copyItemReplacing(from: builtinFilePath, to: destFilePath)
-                        self.logger.info("downloadManifest \(fileName) using builtin file \(id)")
+                    if FileManager.default.fileExists(atPath: task.builtinFilePath.path) &&
+                        self.verifyChecksum(file: task.builtinFilePath, expectedHash: task.finalFileHash) {
+                        try self.copyItemReplacing(from: task.builtinFilePath, to: task.destFilePath)
+                        self.logger.info("downloadManifest \(task.fileName) using builtin file \(id)")
                     }
                     // Try cache
                     else if
-                        (cacheFilePath != nil && self.tryCopyFromCache(from: cacheFilePath!, to: destFilePath, expectedHash: finalFileHash)) ||
-                            (legacyCacheFilePath != nil && self.tryCopyFromCache(from: legacyCacheFilePath!, to: destFilePath, expectedHash: finalFileHash)) {
-                        self.logger.info("downloadManifest \(fileName) copy from cache \(id)")
+                        (task.cacheFilePath != nil &&
+                            self.tryCopyFromCache(from: task.cacheFilePath!, to: task.destFilePath, expectedHash: task.finalFileHash)) ||
+                            (task.legacyCacheFilePath != nil &&
+                                self.tryCopyFromCache(from: task.legacyCacheFilePath!, to: task.destFilePath, expectedHash: task.finalFileHash)) {
+                        self.logger.info("downloadManifest \(task.fileName) copy from cache \(id)")
                     }
                     // Download
                     else {
                         try self.downloadManifestFile(
-                            downloadUrl: downloadUrl,
-                            destFilePath: destFilePath,
-                            cacheFilePath: cacheFilePath,
-                            fileHash: finalFileHash,
-                            fileName: fileName,
-                            destFileName: destFileName,
-                            isBrotli: isBrotli,
+                            downloadUrl: task.downloadUrl,
+                            destFilePath: task.destFilePath,
+                            cacheFilePath: task.cacheFilePath,
+                            fileHash: task.finalFileHash,
+                            fileName: task.fileName,
+                            destFileName: task.destFileName,
+                            isBrotli: task.isBrotli,
                             sessionKey: sessionKey,
                             version: version,
                             bundleId: id
@@ -1544,8 +1824,8 @@ import UIKit
                     }
                     errorLock.unlock()
                     hasError.value = true
-                    self.logger.error("Manifest file download failed: \(fileName)")
-                    self.logger.debug("Bundle: \(id), File: \(fileName), Error: \(error.localizedDescription)")
+                    self.logger.error("Manifest file download failed: \(task.fileName)")
+                    self.logger.debug("Bundle: \(id), File: \(task.fileName), Error: \(error.localizedDescription)")
                 }
             }
 
@@ -1682,7 +1962,7 @@ import UIKit
 
         do {
             var source = partialURL
-            if !self.publicKey.isEmpty && !sessionKey.isEmpty {
+            if !self.publicKey.isEmpty && CryptoCipher.isValidSessionKey(sessionKey) {
                 let work = cacheFolder.appendingPathComponent("work_\(UUID().uuidString)_\((fileName as NSString).lastPathComponent)")
                 try FileManager.default.copyItem(at: partialURL, to: work)
                 workURL = work
@@ -1984,6 +2264,7 @@ import UIKit
     }
 
     public func download(url: URL, version: String, sessionKey: String, link: String? = nil, comment: String? = nil) throws -> BundleInfo {
+        try self.requireSessionKeyForEncryptedUpdate(sessionKey: sessionKey, versionName: version)
         try self.runBeforeDownload()
         let id: String = self.randomString(length: 10)
         // Each download uses its own temp files keyed by bundle ID to prevent collisions
@@ -2026,6 +2307,12 @@ import UIKit
         }
 
         let downloadResult = performDownloadRequest(request, label: "download \(version)")
+        // Error responses (e.g. an HTTP 404 body) are also saved to a temp file; never leave them behind.
+        defer {
+            if let fileURL = downloadResult.fileURL {
+                try? FileManager.default.removeItem(at: fileURL)
+            }
+        }
 
         if downloadResult.timedOut {
             persistPartialDownload(downloadResult, id: id, tempPath: tempPath, existingBytes: totalReceivedBytes)
@@ -2264,6 +2551,15 @@ import UIKit
         self.deleteLock.lock()
         defer { self.deleteLock.unlock() }
 
+        let destPersist: URL
+        do {
+            destPersist = try self.getBundleDirectory(id: id)
+        } catch {
+            logger.error("Cannot delete bundle with invalid id")
+            logger.debug("Bundle ID: \(id), Error: \(error.localizedDescription)")
+            return false
+        }
+
         let deleted: BundleInfo = self.getBundleInfo(id: id)
         if deleted.isBuiltin() || self.getCurrentBundleId() == id {
             logger.info("Cannot delete current or builtin bundle")
@@ -2292,7 +2588,6 @@ import UIKit
             return false
         }
 
-        let destPersist: URL = libraryDir.appendingPathComponent(bundleDirectory).appendingPathComponent(id)
         let hadRegistry = self.hasStoredBundleInfo(id: id)
         let hadFolder = FileManager.default.fileExists(atPath: destPersist.path)
         if !hadRegistry && !hadFolder {
@@ -2596,8 +2891,8 @@ import UIKit
         }
     }
 
-    public func getBundleDirectory(id: String) -> URL {
-        return libraryDir.appendingPathComponent(self.bundleDirectory).appendingPathComponent(id)
+    public func getBundleDirectory(id: String) throws -> URL {
+        return try Self.resolveBundleDirectory(libraryDir: libraryDir, bundleId: id)
     }
 
     struct ResetState {
@@ -2651,7 +2946,12 @@ import UIKit
     }
 
     private func bundleExists(id: String) -> Bool {
-        let destPersist: URL = self.getBundleDirectory(id: id)
+        let destPersist: URL
+        do {
+            destPersist = try self.getBundleDirectory(id: id)
+        } catch {
+            return false
+        }
         let indexPersist: URL = destPersist.appendingPathComponent("index.html")
         let bundleIndo: BundleInfo = self.getBundleInfo(id: id)
         if
@@ -2674,7 +2974,12 @@ import UIKit
         }
         if bundleExists(id: id) {
             let currentBundleName = self.getCurrentBundle().getVersionName()
-            self.setCurrentBundle(bundle: self.getBundleDirectory(id: id).path)
+            guard let bundleDir = try? self.getBundleDirectory(id: id) else {
+                self.setBundleStatus(id: id, status: BundleStatus.ERROR)
+                self.sendStats(action: "set_fail", versionName: newBundle.getVersionName())
+                return false
+            }
+            self.setCurrentBundle(bundle: bundleDir.path)
             self.setBundleStatus(id: id, status: BundleStatus.PENDING)
             self.sendStats(action: "set", versionName: newBundle.getVersionName(), oldVersionName: currentBundleName)
             return true
@@ -2688,7 +2993,10 @@ import UIKit
         guard !bundle.isBuiltin(), bundleExists(id: bundle.getId()) else {
             return false
         }
-        self.setCurrentBundle(bundle: self.getBundleDirectory(id: bundle.getId()).path)
+        guard let bundleDir = try? self.getBundleDirectory(id: bundle.getId()) else {
+            return false
+        }
+        self.setCurrentBundle(bundle: bundleDir.path)
         return true
     }
 
@@ -2703,7 +3011,10 @@ import UIKit
         guard bundleExists(id: bundle.getId()) else {
             return false
         }
-        self.setCurrentBundle(bundle: self.getBundleDirectory(id: bundle.getId()).path)
+        guard let bundleDir = try? self.getBundleDirectory(id: bundle.getId()) else {
+            return false
+        }
+        self.setCurrentBundle(bundle: bundleDir.path)
         return true
     }
 
@@ -2789,8 +3100,15 @@ import UIKit
         self.setBundleStatus(id: bundle.getId(), status: BundleStatus.ERROR)
     }
 
-    func unsetChannel(defaultChannelKey: String, configDefaultChannel: String) -> SetChannel {
+    func unsetChannel(defaultChannelKey: String, configDefaultChannel: String, allowSetDefaultChannel: Bool) -> SetChannel {
         let setChannel: SetChannel = SetChannel()
+
+        if !allowSetDefaultChannel {
+            logger.error("unsetChannel is disabled by allowSetDefaultChannel config")
+            setChannel.message = "unsetChannel is disabled by configuration"
+            setChannel.error = "disabled_by_config"
+            return setChannel
+        }
 
         // Clear persisted defaultChannel and revert to config value
         UserDefaults.standard.removeObject(forKey: defaultChannelKey)
@@ -3312,24 +3630,20 @@ import UIKit
 
         let operation = BlockOperation {
             let semaphore = DispatchSemaphore(value: 0)
-            self.alamofireSession.request(
-                self.statsUrl,
-                method: .post,
-                parameters: eventsToSend,
-                encoder: JSONParameterEncoder.default,
-                requestModifier: { $0.timeoutInterval = self.timeout }
-            ).responseData { response in
+            self.sendJSONPost(urlString: self.statsUrl, body: {
+                try JSONEncoder().encode(eventsToSend)
+            }, completion: { responseData, httpResponse, responseError in
                 if self.abandonStoppedStatsFlush() {
                     semaphore.signal()
                     return
                 }
-                if self.checkAndHandleRateLimitResponse(statusCode: response.response?.statusCode, data: response.data, response: response.response).blocked {
+                if self.checkAndHandleRateLimitResponse(statusCode: httpResponse?.statusCode, data: responseData, response: httpResponse).blocked {
                     self.requeueStatsEvents(queuedEvents)
                     semaphore.signal()
                     return
                 }
 
-                if let statusCode = response.response?.statusCode, !(200...299).contains(statusCode) {
+                if let statusCode = httpResponse?.statusCode, !(200...299).contains(statusCode) {
                     if CapgoUpdater.isTransientStatsFailure(statusCode) {
                         self.requeueStatsEvents(queuedEvents)
                         self.logger.error("Error sending stats batch")
@@ -3343,19 +3657,18 @@ import UIKit
                     return
                 }
 
-                switch response.result {
-                case .success:
+                if let error = responseError {
+                    self.requeueStatsEvents(queuedEvents)
+                    self.logger.error("Error sending stats batch")
+                    self.logger.debug("Response: nil, Error: \(error.localizedDescription)")
+                } else {
                     self.clearStatsInFlight()
                     self.logger.info("Stats batch sent successfully")
                     self.logger.debug("Sent \(eventsToSend.count) events")
                     self.runStatsCallbacks(queuedEvents)
-                case let .failure(error):
-                    self.requeueStatsEvents(queuedEvents)
-                    self.logger.error("Error sending stats batch")
-                    self.logger.debug("Response: \(response.value?.debugDescription ?? "nil"), Error: \(error.localizedDescription)")
                 }
                 semaphore.signal()
-            }
+            })
             semaphore.wait()
             if !self.statsStopped {
                 self.persistStatsQueue()

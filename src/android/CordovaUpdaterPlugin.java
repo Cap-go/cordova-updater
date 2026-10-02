@@ -36,7 +36,6 @@ import com.google.android.play.core.install.InstallStateUpdatedListener;
 import com.google.android.play.core.install.model.AppUpdateType;
 import com.google.android.play.core.install.model.InstallStatus;
 import com.google.android.play.core.install.model.UpdateAvailability;
-import io.github.g00fy2.versioncompare.Version;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -245,6 +244,11 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     private Boolean isPreviousMainActivity = true;
 
     private volatile Thread backgroundDownloadTask;
+    private volatile long activeBackgroundDownloadGeneration = 0L;
+    private final Object readyGuardLock = new Object();
+    private Object readyGenerationScriptHandle;
+    private volatile int readyGeneration = 0;
+    private volatile boolean readyGuardArmed = false;
     private volatile Thread appReadyCheck;
     private volatile long downloadStartTimeMs = 0;
     private static final long DOWNLOAD_TIMEOUT_MS = 600000; // 10 minute timeout
@@ -712,6 +716,11 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                 }
 
                 @Override
+                public void backgroundDownloadSettled(final BundleInfo bundle, final String status, final long settlementToken) {
+                    CordovaUpdaterPlugin.this.emitLaunchDownloadReady(bundle, status, settlementToken);
+                }
+
+                @Override
                 public void notifyListeners(final String id, final Map<String, Object> res) {
                     if (activity != null) {
                         activity.runOnUiThread(() -> {
@@ -753,6 +762,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         CryptoCipher.setLogger(logger);
         DownloadService.setLogger(logger);
         DownloadWorkerManager.setLogger(logger);
+        DownloadService.setAllowHttpsToHttpRedirect(this.updaterConfig.getBoolean("allowHttpsToHttpRedirect", false));
 
         this.implementation.appId = InternalUtils.getPackageName(getContext().getPackageManager(), getContext().getPackageName());
         this.implementation.appId = updaterConfig.getString("appId", this.implementation.appId);
@@ -2002,6 +2012,32 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         this.logger = logger;
     }
 
+    static boolean shouldAcceptBackgroundDownloadSettlement(final long settlementToken, final long activeGeneration) {
+        return settlementToken > 0L && settlementToken == activeGeneration;
+    }
+
+    void emitLaunchDownloadReady(final BundleInfo bundle, final String status, final long settlementToken) {
+        if (!shouldAcceptBackgroundDownloadSettlement(settlementToken, this.activeBackgroundDownloadGeneration)) {
+            logger.info("Ignoring stale background download settlement");
+            return;
+        }
+        final BundleInfo readyBundle = bundle != null ? bundle : this.implementation.getCurrentBundle();
+        if (readyBundle == null) {
+            return;
+        }
+        this.endBackGroundTaskWithNotif(
+            status,
+            readyBundle.getVersionName(),
+            readyBundle,
+            false,
+            false,
+            "download_fail",
+            "downloadFailed",
+            false,
+            false
+        );
+    }
+
     void completeBackgroundTaskForTesting(final BundleInfo current, final boolean plannedDirectUpdate) {
         this.endBackGroundTaskWithNotif("test", current.getVersionName(), current, false, plannedDirectUpdate);
     }
@@ -2373,6 +2409,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                     CordovaUpdaterPlugin.this.editor,
                     DEFAULT_CHANNEL_PREF_KEY,
                     configDefaultChannel,
+                    CordovaUpdaterPlugin.this.allowSetDefaultChannel,
                     (res) -> {
                         JSObject jsRes = InternalUtils.mapToJSObject(res);
                         if (jsRes.has("error")) {
@@ -2546,6 +2583,20 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         final String checksum,
         final JSONArray manifest
     ) throws IOException {
+        if (!this.implementation.publicKey.isEmpty() && !CryptoCipher.isValidSessionKey(sessionKey)) {
+            logger.error("Public key present but no valid session key provided");
+            this.implementation.sendStats("session_key_required");
+            throw new IOException("Session key required when public key is present");
+        }
+        if (manifest != null && manifest.length() == 0) {
+            logger.error("Empty manifest provided");
+            throw new IOException("Manifest cannot be empty");
+        }
+        if (manifest == null && (checksum == null || checksum.isEmpty())) {
+            logger.error("No checksum provided");
+            this.implementation.sendStats("checksum_required");
+            throw new IOException("Checksum required");
+        }
         if (manifest != null) {
             return this.implementation.downloadManifest(url, version, sessionKey, checksum, manifest);
         }
@@ -2621,6 +2672,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             this.syncKeepUrlPathFlag(true);
         }
         logger.info("Reloading: " + path);
+        this.stampReadyGenerationBeforeReload();
 
         if (pathHandler != null) {
             if (usingBuiltin) {
@@ -4063,9 +4115,103 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             this.periodCheckDelay
         );
     }
+    static boolean shouldAcceptReadyCall(
+        final boolean guardArmed,
+        final int expectedGeneration,
+        final boolean hasGeneration,
+        final int reportedGeneration
+    ) {
+        if (!guardArmed) {
+            return true;
+        }
+        return hasGeneration && reportedGeneration == expectedGeneration;
+    }
+
+    static String readyGenerationScript(final int generation) {
+        return "(function(){window.__CAPGO_READY_GEN=" + generation + ";})();";
+    }
+
+    private int armReadyGuard() {
+        synchronized (this.readyGuardLock) {
+            this.readyGeneration = this.readyGeneration + 1;
+            this.readyGuardArmed = true;
+            return this.readyGeneration;
+        }
+    }
+
+    private void disarmReadyGuard(final int generation) {
+        synchronized (this.readyGuardLock) {
+            if (this.readyGeneration == generation) {
+                this.readyGuardArmed = false;
+                logger.warn("Could not stamp notifyAppReady for the next page. Readiness guard disabled for this reload.");
+            }
+        }
+    }
+
+    private void stampReadyGenerationBeforeReload() {
+        final int generation = this.armReadyGuard();
+        final android.webkit.WebView webView = getUpdaterWebView();
+        if (webView == null) {
+            this.disarmReadyGuard(generation);
+            return;
+        }
+        cordova.getActivity().runOnUiThread(() -> {
+            if (!this.installReadyGenerationScript(webView, generation)) {
+                this.disarmReadyGuard(generation);
+            }
+        });
+    }
+
+    private boolean installReadyGenerationScript(final android.webkit.WebView webView, final int generation) {
+        try {
+            final Class<?> webViewFeature = Class.forName("androidx.webkit.WebViewFeature");
+            final String feature = (String) webViewFeature.getField("DOCUMENT_START_SCRIPT").get(null);
+            final Boolean supported = (Boolean) webViewFeature.getMethod("isFeatureSupported", String.class).invoke(null, feature);
+            if (!Boolean.TRUE.equals(supported)) {
+                return false;
+            }
+            final Class<?> webViewCompat = Class.forName("androidx.webkit.WebViewCompat");
+            if (this.readyGenerationScriptHandle != null) {
+                try {
+                    this.readyGenerationScriptHandle.getClass().getMethod("remove").invoke(this.readyGenerationScriptHandle);
+                } catch (final Exception removeError) {
+                    logger.warn("Unable to remove previous notifyAppReady generation script: " + removeError.getMessage());
+                }
+                this.readyGenerationScriptHandle = null;
+            }
+            this.readyGenerationScriptHandle = webViewCompat
+                .getMethod("addDocumentStartJavaScript", android.webkit.WebView.class, String.class, Set.class)
+                .invoke(null, webView, readyGenerationScript(generation), java.util.Collections.singleton("*"));
+            return true;
+        } catch (final Exception e) {
+            logger.warn("Unable to stamp notifyAppReady generation: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean acceptsReadyCall(final PluginCall call) {
+        if (!this.readyGuardArmed) {
+            return true;
+        }
+        final JSONObject data = call.getData();
+        final boolean hasGeneration = data != null && data.has("loadGeneration");
+        final int reported = hasGeneration ? data.optInt("loadGeneration", -1) : -1;
+        return shouldAcceptReadyCall(this.readyGuardArmed, this.readyGeneration, hasGeneration, reported);
+    }
+
     public void notifyAppReady(final PluginCall call) {
         ensureBridgeSet();
         try {
+            if (!this.acceptsReadyCall(call)) {
+                logger.info("Ignoring notifyAppReady from a page that is no longer current");
+                final BundleInfo current = this.implementation.getCurrentBundle();
+                final app.capgo.cordova.updater.compat.JSObject ignored = new app.capgo.cordova.updater.compat.JSObject();
+                if (current != null) {
+                    ignored.put("bundle", InternalUtils.mapToJSObject(current.toJSONMap()));
+                }
+                call.resolve(ignored);
+                return;
+            }
             final BundleInfo bundle = this.implementation.getCurrentBundle();
             this.implementation.setSuccess(bundle, this.autoDeletePrevious);
             logger.info("Current bundle loaded successfully. ['notifyAppReady()' was called] " + bundle);
@@ -4352,6 +4498,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         if (this.shouldBlockAutoUpdateForPreviewSession()) {
             return null;
         }
+        final long generation = ++this.activeBackgroundDownloadGeneration;
         final boolean plannedDirectUpdate = this.shouldUseDirectUpdate();
         final boolean initialDirectUpdateAllowed = this.isDirectUpdateCurrentlyAllowed(plannedDirectUpdate);
         final String messageUpdate = initialDirectUpdateAllowed
@@ -4487,6 +4634,22 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                         if (
                             latestVersionName != null && !latestVersionName.isEmpty() && !current.getVersionName().equals(latestVersionName)
                         ) {
+                            final String latestSessionKey = jsRes.has("sessionKey") ? jsRes.getString("sessionKey") : "";
+                            if (
+                                !CordovaUpdaterPlugin.this.implementation.publicKey.isEmpty() &&
+                                !CryptoCipher.isValidSessionKey(latestSessionKey)
+                            ) {
+                                logger.error("Public key present but no valid session key provided");
+                                CordovaUpdaterPlugin.this.implementation.sendStats("session_key_required");
+                                CordovaUpdaterPlugin.this.endBackGroundTaskWithNotif(
+                                    "Session key required when public key is present",
+                                    latestVersionName,
+                                    current,
+                                    true,
+                                    plannedDirectUpdate
+                                );
+                                return;
+                            }
                             final BundleInfo latest = CordovaUpdaterPlugin.this.implementation.getBundleInfoByName(latestVersionName);
                             if (latest != null) {
                                 final app.capgo.cordova.updater.compat.JSObject ret = new app.capgo.cordova.updater.compat.JSObject();
@@ -4502,7 +4665,10 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                                     );
                                     return;
                                 }
-                                if (latest.isDownloaded() && BundleStatus.DOWNLOADING != latest.getStatus()) {
+                                if (
+                                    latest.isDownloaded() &&
+                                    BundleStatus.DOWNLOADING != latest.getStatus()
+                                ) {
                                     logger.info("Latest bundle already exists and download is NOT required. " + messageUpdate);
                                     final boolean directUpdateAllowedNow = CordovaUpdaterPlugin.this.isDirectUpdateCurrentlyAllowed(
                                         plannedDirectUpdate
@@ -4623,7 +4789,8 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                                             sessionKey,
                                             checksum,
                                             manifest,
-                                            CordovaUpdaterPlugin.this.shouldAutoSetNextBundle()
+                                            CordovaUpdaterPlugin.this.shouldAutoSetNextBundle(),
+                                            generation
                                         );
                                     } else {
                                         // Handle single file download (existing code)
@@ -4633,7 +4800,8 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                                             sessionKey,
                                             checksum,
                                             null,
-                                            CordovaUpdaterPlugin.this.shouldAutoSetNextBundle()
+                                            CordovaUpdaterPlugin.this.shouldAutoSetNextBundle(),
+                                            generation
                                         );
                                     }
                                 } catch (final Exception e) {

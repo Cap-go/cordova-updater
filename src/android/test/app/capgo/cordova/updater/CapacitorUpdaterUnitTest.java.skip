@@ -287,19 +287,9 @@ public class CapacitorUpdaterUnitTest {
             final String version,
             final String sessionKey,
             final String checksum,
-            final JSONArray manifest
-        ) {
-            this.downloadBackground(url, version, sessionKey, checksum, manifest, true);
-        }
-
-        @Override
-        public void downloadBackground(
-            final String url,
-            final String version,
-            final String sessionKey,
-            final String checksum,
             final JSONArray manifest,
-            final boolean setNext
+            final boolean setNext,
+            final long settlementToken
         ) {
             this.downloadBackgroundCalled = true;
             this.downloadBackgroundSetNext = setNext;
