@@ -1576,27 +1576,6 @@ public class CapgoUpdater {
         final String version,
         final String sessionKey,
         final String checksum,
-        final JSONArray manifest
-    ) {
-        downloadBackground(url, version, sessionKey, checksum, manifest, true);
-    }
-
-    public void downloadBackground(
-        final String url,
-        final String version,
-        final String sessionKey,
-        final String checksum,
-        final JSONArray manifest,
-        final boolean setNext
-    ) {
-        this.downloadBackground(url, version, sessionKey, checksum, manifest, setNext, 0L);
-    }
-
-    public void downloadBackground(
-        final String url,
-        final String version,
-        final String sessionKey,
-        final String checksum,
         final JSONArray manifest,
         final boolean setNext,
         final long settlementToken
