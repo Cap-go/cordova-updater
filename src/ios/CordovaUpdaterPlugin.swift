@@ -201,6 +201,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     let semaphoreReady = DispatchSemaphore(value: 0)
     private var readyGuardArmed = false
     private var readyGeneration = 0
+    private var readyGenerationUserScript: WKUserScript?
 
     private var delayUpdateUtils: DelayUpdateUtils!
 
@@ -2905,9 +2906,13 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
                 allowSetDefaultChannel: self.allowSetDefaultChannel
             )
             if res.error != "" {
-                self.rejectCall(call, message: res.error, code: "UNSETCHANNEL_FAILED", data: [
-                    "message": res.error,
-                    "error": res.error.contains("Channel URL") ? "missing_config" : "request_failed"
+                let errorCode = res.error == "disabled_by_config"
+                    ? "disabled_by_config"
+                    : (res.error.contains("Channel URL") ? "missing_config" : "request_failed")
+                let message = res.message.isEmpty ? res.error : res.message
+                self.rejectCall(call, message: message, code: "UNSETCHANNEL_FAILED", data: [
+                    "message": message,
+                    "error": errorCode
                 ])
             } else {
                 guard self.persistDefaultChannelStateFromDefaults() else {
@@ -3145,21 +3150,28 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     }
 
     private func armReadyGuard(webView: WKWebView?) {
-        let generation: Int
-        if self.readyGuardArmed {
-            generation = self.readyGeneration
-        } else {
-            generation = self.readyGeneration + 1
-            self.readyGeneration = generation
-            self.readyGuardArmed = true
-        }
+        self.readyGeneration += 1
+        let generation = self.readyGeneration
+        self.readyGuardArmed = true
         guard let webView else {
             logger.warn("Cannot stamp notifyAppReady generation without a webview")
             self.readyGuardArmed = false
             return
         }
-        DispatchQueue.main.async {
-            webView.evaluateJavaScript(CordovaUpdaterPlugin.readyGenerationScript(generation), completionHandler: nil)
+        let installScript = {
+            let source = CordovaUpdaterPlugin.readyGenerationScript(generation)
+            let userScript = WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+            let controller = webView.configuration.userContentController
+            if let previous = self.readyGenerationUserScript {
+                controller.removeUserScript(previous)
+            }
+            controller.addUserScript(userScript)
+            self.readyGenerationUserScript = userScript
+        }
+        if Thread.isMainThread {
+            installScript()
+        } else {
+            DispatchQueue.main.sync(execute: installScript)
         }
     }
 

@@ -43,7 +43,7 @@
     "verify:web": "bun run build",
     "verify:android": "cd android && ./gradlew clean test && cd ..",
     "verify:ios": "SDK=$(xcrun --sdk iphonesimulator --show-sdk-path) && swift build --sdk \"$SDK\" --triple arm64-apple-ios16.0-simulator",
-    "native:contract": "bun run native:contract:android && bun run native:contract:ios",
+    "native:contract": "bun run native:contract:android && bun run native:contract:crypto:android && bun run native:contract:ios && bun run native:contract:crypto:ios",
     "test:maestro": "./scripts/maestro/run-android-live-update.sh",
     "test:maestro:android": "./scripts/test-maestro-android.sh",
     "test:maestro:ios": "./scripts/maestro/run-ios-live-update.sh",

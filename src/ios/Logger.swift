@@ -261,6 +261,8 @@ public class Logger {
         if let data = try? JSONEncoder().encode(value),
            let encoded = String(data: data, encoding: .utf8) {
             return encoded
+                .replacingOccurrences(of: "\u{2028}", with: "\\u2028")
+                .replacingOccurrences(of: "\u{2029}", with: "\\u2029")
         }
 
         // Fallback manual escaping (unlikely to be used)

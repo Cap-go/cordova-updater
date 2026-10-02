@@ -12,11 +12,44 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const outputPath = path.join(root, 'native-contract-tests', 'crypto-rsa.json');
 
-const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
-  modulusLength: 2048,
-  publicKeyEncoding: { type: 'pkcs1', format: 'pem' },
-  privateKeyEncoding: { type: 'pkcs1', format: 'pem' },
-});
+// Fixed non-secret test key pair so --check and committed fixtures stay stable across runs.
+const privateKey = `-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDDdDrXZSvJElZe
+AcI24jzE5rm/gpRnLom19du/SWyhjETygyCoTSMWQHasdwyg7dVLt8uuKx5hQDdR
+b4LcHt1ZMb1roqxDv3cA66vFm/RhNTGrL53xia7I9WzyXtkAwGQmE8p7tH5DImgG
+op6jG99Xh7nBzi06GfxvCwP8AyLPUTCA2ePANfB34SqQRe5DbzqjnUPho3zqb10g
+uhde6/pOdthf48NMTkqECEwt4nZTFVMbF9WbstYYgUN9VMcb+vYKh77mQdn5kCM+
+d7zyhRxuBP+KaKbqMDHa2qEkWpj3tYmfDTl0DZb9ZRP8vEOLLMkayO42fTcFNJ4B
+SIcCnsTLAgMBAAECggEAKNwQ+vty8ldrh759X+TeyFjlhuQg6wsfDdOGa1BJreH5
+fessthJeHeY/COHgWXoux2P2aAQqlzEJ/3O82xB2vJE55Jj+wzDxC1e5MpfeOD4b
+EorjTV23lNo9utNaMR6HMTCc+UxrwtQcBBsV58pJX+6HRj04VjedfodCf3oWWllk
+POSFsw6x7nYFgBPIFtnbyhN1bE/nW+UvwmOtSdjkIo57XAhls9RQFLpIrelRj+Bg
+oicKyLlbr6utxxnffflPOTwF1ubI5WWHe4lwuCDGE8NY4OExa4Ord9emLSyDodxw
+XafxGtwRNyzLlfy5VJO4JoJtkUf8f1UdPdNh7WZqYQKBgQD2xOGzItMyqQLeVU9B
+y2bPeN5kQvV9JI78UQZUr5mPaqNdGw1+HiEQalwvz2HTaA1Z47rAixBWtQ8LTzxo
+me79Oy/yxzkoOkz6046nprhfLkv5pvZx7qvAgzPw1j0NX6J8YXphlycTWBeafMIH
+RhnDTZLZubeGioFfPHKrx4VcKwKBgQDKw/F9TGLhvL6NSo0imutqis/si4yMiMFp
+2op7I0fN9g+YHA9/1tAEKfpW1Q/Lo66QPahGEmqjnnd4lWUXAs/ZCNVfHJo/mCVP
+ZOxZLdZ4dS7oJ9oqzexVjCx55XuQk3eVpHzAjBLE8mOmPKhI0iE88CbNoNWJ7N2+
+bdMC7qHJ4QKBgQCEpEFZQ7/YPEahcaOfjxCdNq/7no5MDQmakIbhoF3fXAehtTfk
+cZd+Nl2FCWjg9M4wYhtxAY7vvHTwtE+ZPhzbGyRj0Dhl6iiUroDAlvoFl2IZOGjB
+xvOlECEsNEwu0xgI2XCp4lCLsk9FqAe3VzPj6d+kjpIajHqL0Xcl5KJHbwKBgHB6
+n8S1EglNTZtNZttyevNgS5VZmD8BQeG5lKZYXOW5AM+NiV+OR1h3/OIcUSXTB+wF
++Ane/38CUh33KdvI+InZ55taX4q1mMThJGcYEWhDASFRsimaj+ao2qdIEPKTi3vc
+gkPBsEvGdlbqQSQcRMnsImphNPPNDPktLSfsPp2hAoGBANJVAeJz4ubi3VSgeywy
+aDJOyKqCb0G/x2nrl1xgMB6hSqNknqy4KK8HvOOC363ZhDH1d7tif9S9txt2PWzy
+BewKzcgKZBLE1ztscN0yIFfhb151Ps8rG2wt5jGIXKK8kVsfIpKtCyKTAmbQc3Wo
+ulKhlUZxJCI5rAsPTrPrh6fC
+-----END PRIVATE KEY-----`;
+
+const publicKey = `-----BEGIN RSA PUBLIC KEY-----
+MIIBCgKCAQEAw3Q612UryRJWXgHCNuI8xOa5v4KUZy6JtfXbv0lsoYxE8oMgqE0j
+FkB2rHcMoO3VS7fLriseYUA3UW+C3B7dWTG9a6KsQ793AOurxZv0YTUxqy+d8Ymu
+yPVs8l7ZAMBkJhPKe7R+QyJoBqKeoxvfV4e5wc4tOhn8bwsD/AMiz1EwgNnjwDXw
+d+EqkEXuQ286o51D4aN86m9dILoXXuv6TnbYX+PDTE5KhAhMLeJ2UxVTGxfVm7LW
+GIFDfVTHG/r2Coe+5kHZ+ZAjPne88oUcbgT/imim6jAx2tqhJFqY97WJnw05dA2W
+/WUT/LxDiyzJGsjuNn03BTSeAUiHAp7EywIDAQAB
+-----END RSA PUBLIC KEY-----`;
 
 function privateEncrypt(plaintext) {
   return crypto.privateEncrypt(

@@ -1775,6 +1775,9 @@ export interface CordovaUpdaterPlugin {
   completeFlexibleUpdate(): Promise<void>;
 }
 
+/** @deprecated Use {@link CordovaUpdaterPlugin}. */
+export type UpdaterPlugin = CordovaUpdaterPlugin;
+
 /**
  * pending: The bundle is pending to be **SET** as the next bundle.
  * downloading: The bundle is being downloaded.

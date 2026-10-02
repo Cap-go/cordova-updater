@@ -153,8 +153,15 @@ final class ZipArchiveReader {
         return result
     }
 
+    static func dataRangeFitsWithin(offset: UInt64, length: UInt64, upperBound: UInt64) -> Bool {
+        guard length <= upperBound else {
+            return false
+        }
+        return offset <= upperBound - length
+    }
+
     private func readStored(from offset: UInt64, size: UInt64, bufferSize: Int, consumer: (Data) throws -> Void) throws {
-        guard offset + size <= centralDirectoryOffset else {
+        guard Self.dataRangeFitsWithin(offset: offset, length: size, upperBound: centralDirectoryOffset) else {
             throw ZipError.corruptedEntryData
         }
         guard size <= fileSize, offset <= fileSize - size else {
@@ -183,7 +190,7 @@ final class ZipArchiveReader {
         bufferSize: Int,
         consumer: (Data) throws -> Void
     ) throws {
-        guard offset + compressedSize <= centralDirectoryOffset else {
+        guard Self.dataRangeFitsWithin(offset: offset, length: compressedSize, upperBound: centralDirectoryOffset) else {
             throw ZipError.corruptedEntryData
         }
         guard compressedSize <= fileSize, offset <= fileSize - compressedSize else {

@@ -52,6 +52,7 @@
     <preference name="PERSIST_CUSTOM_ID" default="false"/>
     <preference name="PERSIST_MODIFY_URL" default="false"/>
     <preference name="PERSIST_DEFAULT_CHANNEL_ON_REINSTALL" default="true"/>
+    <preference name="ALLOW_HTTPS_TO_HTTP_REDIRECT" default="false"/>
 
     <platform name="android">
         <config-file target="res/xml/config.xml" parent="/*">
@@ -172,6 +173,7 @@
         <config-file target="*-Info.plist" parent="CapgoUpdaterPersistCustomId"><string>$PERSIST_CUSTOM_ID</string></config-file>
         <config-file target="*-Info.plist" parent="CapgoUpdaterPersistModifyUrl"><string>$PERSIST_MODIFY_URL</string></config-file>
         <config-file target="*-Info.plist" parent="CapgoUpdaterPersistDefaultChannelOnReinstall"><string>$PERSIST_DEFAULT_CHANNEL_ON_REINSTALL</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAllowHttpsToHttpRedirect"><string>$ALLOW_HTTPS_TO_HTTP_REDIRECT</string></config-file>
 
 
         <source-file src="src/ios/AES.swift"/>

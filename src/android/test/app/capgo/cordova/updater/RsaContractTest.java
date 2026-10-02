@@ -52,14 +52,6 @@ public class RsaContractTest {
         return out;
     }
 
-    private static String bytesToHex(byte[] bytes) {
-        final StringBuilder builder = new StringBuilder(bytes.length * 2);
-        for (byte value : bytes) {
-            builder.append(String.format("%02x", value));
-        }
-        return builder.toString();
-    }
-
     @Test
     public void rsaPublicDecryptMatchesNativeContract() throws Exception {
         final PublicKey publicKey = CryptoCipher.stringToPublicKey(contract.getString("publicKeyPem"));

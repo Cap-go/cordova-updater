@@ -4124,10 +4124,8 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
 
     private int armReadyGuard() {
         synchronized (this.readyGuardLock) {
-            if (!this.readyGuardArmed) {
-                this.readyGeneration = this.readyGeneration + 1;
-                this.readyGuardArmed = true;
-            }
+            this.readyGeneration = this.readyGeneration + 1;
+            this.readyGuardArmed = true;
             return this.readyGeneration;
         }
     }

@@ -1577,6 +1577,7 @@ public class CapgoUpdater {
                 // Cancel the failed download and allow retry
                 if (!DownloadWorkerManager.cancelVersionDownloadAndAwait(this.activity, version)) {
                     logger.error("Failed to cancel previous download before retry");
+                    this.backgroundDownloadSettled(this.getCurrentBundle(), launchDownloadReadyStatus(false, setNext));
                     return;
                 }
                 logger.info("Retrying failed download for version: " + version);
@@ -1584,6 +1585,7 @@ public class CapgoUpdater {
                 // Left over from a killed process: nothing would finish it or release the launch, so start over.
                 if (!DownloadWorkerManager.cancelVersionDownloadAndAwait(this.activity, version)) {
                     logger.error("Failed to cancel orphaned download before restarting it");
+                    this.backgroundDownloadSettled(this.getCurrentBundle(), launchDownloadReadyStatus(false, setNext));
                     return;
                 }
                 logger.info("Restarting download orphaned by a previous process for version: " + version);
@@ -3579,6 +3581,8 @@ public class CapgoUpdater {
             }
             if (next.equals(this.getCurrentBundleId()) && BundleStatus.SUCCESS == newBundle.getStatus()) {
                 logger.info("Bundle " + next + " is already the current successful bundle. Skip next().");
+                this.editor.remove(NEXT_VERSION);
+                this.editor.commit();
                 return true;
             }
             this.editor.putString(NEXT_VERSION, next);

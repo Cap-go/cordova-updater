@@ -160,6 +160,7 @@ public struct CryptoCipher {
     public static func calcChecksum(filePath: URL) -> String {
         let bufferSize = checksumBufferBytes()
         var sha256 = SHA256()
+        var readFailed = false
 
         let fileHandle: FileHandle
         do {
@@ -186,6 +187,7 @@ public struct CryptoCipher {
             } catch {
                 logger.error("Error reading file during checksum")
                 logger.debug("Error: \(error)")
+                readFailed = true
                 return false
             }
 
@@ -197,7 +199,7 @@ public struct CryptoCipher {
             }
         }) {}
 
-        return hexString(from: sha256)
+        return readFailed ? "" : hexString(from: sha256)
     }
 
     final class RunningChecksum {

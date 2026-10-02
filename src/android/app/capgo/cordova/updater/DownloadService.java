@@ -52,7 +52,7 @@ import org.json.JSONObject;
 public class DownloadService extends Worker {
 
     /** A refused HTTPS to HTTP redirect. Permanent for the given URL, so downloads must not retry it. */
-    static final class BlockedRedirectException extends RuntimeException {
+    static final class BlockedRedirectException extends ProtocolException {
 
         BlockedRedirectException() {
             super("Blocked HTTPS to HTTP redirect; set allowHttpsToHttpRedirect to true to allow it");
@@ -943,9 +943,6 @@ public class DownloadService extends Worker {
         } catch (MalformedURLException e) {
             logger.error("Invalid download URL: " + e.getMessage());
             throw new RuntimeException("invalid_url: " + e.getMessage());
-        } catch (BlockedRedirectException e) {
-            logger.error("Download error: " + e.getMessage());
-            throw new RuntimeException("blocked_redirect: " + e.getMessage());
         } catch (IOException e) {
             logger.error("Download error: " + e.getMessage());
             throw new DownloadRetryException(e.getMessage(), e);

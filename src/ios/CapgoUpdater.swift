@@ -72,19 +72,20 @@ import UIKit
     private var statsQueue: [QueuedStatsEvent] = []
     private var statsInFlight: [QueuedStatsEvent] = []
     private let statsQueueLock = NSLock()
+    private let statsStateLock = NSLock()
     private let statsPersistLock = NSLock()
     private var statsFlushTimer: Timer?
     private var _statsStopped = false
 
     private var statsStopped: Bool {
         get {
-            statsQueueLock.lock()
-            defer { statsQueueLock.unlock() }
+            statsStateLock.lock()
+            defer { statsStateLock.unlock() }
             return _statsStopped
         }
         set {
-            statsQueueLock.lock()
-            defer { statsQueueLock.unlock() }
+            statsStateLock.lock()
+            defer { statsStateLock.unlock() }
             _statsStopped = newValue
         }
     }
@@ -166,15 +167,20 @@ import UIKit
         let canonicalBase = baseDirectory.standardizedFileURL.resolvingSymlinksInPath()
         let canonicalBasePath = canonicalBase.path
         let normalizedBasePath = canonicalBasePath.hasSuffix("/") ? canonicalBasePath : "\(canonicalBasePath)/"
-        let canonicalTarget = canonicalBase.appendingPathComponent(relativePath).standardizedFileURL.resolvingSymlinksInPath()
-        let canonicalTargetPath = canonicalTarget.path
+        let targetURL = canonicalBase.appendingPathComponent(relativePath, isDirectory: false).standardizedFileURL
+        let canonicalTargetPath: String
+        if FileManager.default.fileExists(atPath: targetURL.path) {
+            canonicalTargetPath = targetURL.resolvingSymlinksInPath().path
+        } else {
+            canonicalTargetPath = targetURL.path
+        }
 
         // Require a strict child of the base. Equality would accept "." and wipe/write the root.
         if !canonicalTargetPath.hasPrefix(normalizedBasePath) {
             throw SecurePathError.pathTraversal
         }
 
-        return canonicalTarget
+        return URL(fileURLWithPath: canonicalTargetPath, isDirectory: false)
     }
 
     static func resolveBundleDirectory(libraryDir: URL, bundleId: String) throws -> URL {
