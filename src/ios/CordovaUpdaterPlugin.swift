@@ -3162,9 +3162,6 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             let source = CordovaUpdaterPlugin.readyGenerationScript(generation)
             let userScript = WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
             let controller = webView.configuration.userContentController
-            if let previous = self.readyGenerationUserScript {
-                controller.removeUserScript(previous)
-            }
             controller.addUserScript(userScript)
             self.readyGenerationUserScript = userScript
         }
