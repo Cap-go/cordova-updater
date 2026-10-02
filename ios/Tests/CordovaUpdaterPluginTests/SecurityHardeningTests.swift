@@ -73,7 +73,8 @@ final class SecurityHardeningTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: base) }
 
         let resolved = try CapgoUpdater.resolvePathInsideDirectory(baseDirectory: base, relativePath: "assets/app.js")
-        XCTAssertEqual(resolved.standardizedFileURL.path, base.appendingPathComponent("assets/app.js").standardizedFileURL.path)
+        let expected = base.resolvingSymlinksInPath().appendingPathComponent("assets/app.js").standardizedFileURL.path
+        XCTAssertEqual(resolved.standardizedFileURL.path, expected)
     }
 
     func testResolvePathInsideDirectoryAcceptsNonexistentChild() throws {

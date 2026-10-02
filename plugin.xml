@@ -101,6 +101,7 @@
             <string name="capgo_updater_persist_custom_id">$PERSIST_CUSTOM_ID</string>
             <string name="capgo_updater_persist_modify_url">$PERSIST_MODIFY_URL</string>
             <string name="capgo_updater_persist_default_channel_on_reinstall">$PERSIST_DEFAULT_CHANNEL_ON_REINSTALL</string>
+            <string name="capgo_updater_allow_https_to_http_redirect">$ALLOW_HTTPS_TO_HTTP_REDIRECT</string>
         </config-file>
 
         <framework src="src/android/capgo-cordova-updater.gradle" custom="true" type="gradleReference"/>

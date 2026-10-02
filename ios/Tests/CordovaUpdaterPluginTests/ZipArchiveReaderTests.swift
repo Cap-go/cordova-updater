@@ -3,7 +3,7 @@ import XCTest
 
 final class ZipArchiveReaderTests: XCTestCase {
     func testDataRangeFitsWithinRejectsUInt64Overflow() {
-        let bound: UInt64 = 1_000
+        let bound: UInt64 = .max
         let offset = UInt64.max
         let length: UInt64 = 1
         XCTAssertFalse(ZipArchiveReader.dataRangeFitsWithin(offset: offset, length: length, upperBound: bound))
