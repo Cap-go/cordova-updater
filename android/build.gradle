@@ -65,7 +65,7 @@ repositories {
 
 dependencies {
     implementation 'androidx.work:work-runtime:2.10.5'
-    implementation 'androidx.lifecycle:lifecycle-process:2.10.0'
+    implementation 'androidx.lifecycle:lifecycle-process:2.11.0'
     implementation 'com.google.android.gms:play-services-tasks:18.4.1'
     implementation 'com.google.guava:guava:33.6.0-android'
     implementation 'androidx.appcompat:appcompat:1.7.1'
