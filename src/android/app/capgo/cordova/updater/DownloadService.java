@@ -312,6 +312,38 @@ public class DownloadService extends Worker {
         return seenTargets.add(targetFile.getCanonicalPath());
     }
 
+    private static final class ManifestDownloadTask {
+
+        final String fileName;
+        final String finalFileHash;
+        final String downloadUrl;
+        final boolean isBrotli;
+        final File targetFile;
+        final File builtinFile;
+        final File cacheFile;
+        final File legacyCacheFile;
+
+        ManifestDownloadTask(
+            final String fileName,
+            final String finalFileHash,
+            final String downloadUrl,
+            final boolean isBrotli,
+            final File targetFile,
+            final File builtinFile,
+            final File cacheFile,
+            final File legacyCacheFile
+        ) {
+            this.fileName = fileName;
+            this.finalFileHash = finalFileHash;
+            this.downloadUrl = downloadUrl;
+            this.isBrotli = isBrotli;
+            this.targetFile = targetFile;
+            this.builtinFile = builtinFile;
+            this.cacheFile = cacheFile;
+            this.legacyCacheFile = legacyCacheFile;
+        }
+    }
+
     static boolean tryCopyBuiltinAsset(final AssetManager assets, final String fileName, final File dest, final String expectedHash) {
         if (assets == null || fileName == null || dest == null) {
             return false;
@@ -373,7 +405,7 @@ public class DownloadService extends Worker {
                     return createFailureResult("Manifest is null");
                 }
             } else {
-                handleSingleFileDownload(url, id, documentsDir, dest, version, sessionKey, checksum);
+                handleSingleFileDownload(url, id, documentsDir, dest, version, sessionKey, checksum, publicKey);
                 return createSuccessResult(dest, version, sessionKey, checksum, false);
             }
         } catch (Exception e) {
@@ -459,6 +491,12 @@ public class DownloadService extends Worker {
         try {
             logger.debug("handleManifestDownload");
 
+            if (publicKey != null && !publicKey.isEmpty() && !CryptoCipher.isValidSessionKey(sessionKey)) {
+                logger.error("Public key present but no valid session key provided");
+                sendStatsAsync("session_key_required", version);
+                throw new IOException("Session key required when public key is present");
+            }
+
             // Send stats for manifest download start
             sendStatsAsync("download_manifest_start", version);
 
@@ -479,9 +517,7 @@ public class DownloadService extends Worker {
             int totalFiles = manifest.length();
             final AtomicLong completedFiles = new AtomicLong(0);
             final AtomicBoolean hasError = new AtomicBoolean(false);
-
-            ExecutorService executor = Executors.newFixedThreadPool(Math.min(MANIFEST_MAX_CONCURRENT_FILES, Math.max(1, totalFiles)));
-            List<Future<?>> futures = new ArrayList<>();
+            final List<ManifestDownloadTask> tasks = new ArrayList<>();
             final Set<String> seenTargets = new HashSet<>();
 
             for (int i = 0; i < totalFiles; i++) {
@@ -496,7 +532,13 @@ public class DownloadService extends Worker {
                     continue;
                 }
 
-                if (publicKey != null && !publicKey.isEmpty() && sessionKey != null && !sessionKey.isEmpty()) {
+                if (publicKey != null && !publicKey.isEmpty()) {
+                    if (!CryptoCipher.isValidSessionKey(sessionKey)) {
+                        logger.error("Public key present but no valid session key provided");
+                        sendStatsAsync("session_key_required", version);
+                        hasError.set(true);
+                        continue;
+                    }
                     try {
                         fileHash = CryptoCipher.decryptChecksum(fileHash, publicKey);
                     } catch (Exception e) {
@@ -536,35 +578,56 @@ public class DownloadService extends Worker {
                 final File legacyCacheFile =
                     isBrotli && cacheFile != null ? new File(cacheFolder, finalFileHash + "_" + new File(fileName).getName()) : null;
 
-                // Ensure parent directories of the target file exist
-                if (!Objects.requireNonNull(targetFile.getParentFile()).exists() && !targetFile.getParentFile().mkdirs()) {
-                    logger.error("Failed to create parent directory for: " + targetFile.getAbsolutePath());
-                    hasError.set(true);
-                    continue;
-                }
+                tasks.add(
+                    new ManifestDownloadTask(
+                        fileName,
+                        finalFileHash,
+                        downloadUrl,
+                        isBrotli,
+                        targetFile,
+                        builtinFile,
+                        cacheFile,
+                        legacyCacheFile
+                    )
+                );
+            }
 
-                final boolean finalIsBrotli = isBrotli;
+            if (hasError.get()) {
+                throw new IOException("Manifest contains invalid or duplicate file paths");
+            }
+
+            for (final ManifestDownloadTask task : tasks) {
+                if (!Objects.requireNonNull(task.targetFile.getParentFile()).exists() && !task.targetFile.getParentFile().mkdirs()) {
+                    logger.error("Failed to create parent directory for: " + task.targetFile.getAbsolutePath());
+                    throw new IOException("Failed to create parent directory for: " + task.targetFile.getAbsolutePath());
+                }
+            }
+
+            ExecutorService executor = Executors.newFixedThreadPool(Math.min(MANIFEST_MAX_CONCURRENT_FILES, Math.max(1, totalFiles)));
+            List<Future<?>> futures = new ArrayList<>();
+
+            for (final ManifestDownloadTask task : tasks) {
                 Future<?> future = executor.submit(() -> {
                     try {
-                        if (tryCopyBuiltinAsset(assets, fileName, targetFile, finalFileHash)) {
-                            logger.debug("using builtin asset " + fileName);
-                        } else if (tryCopyBuiltinFile(builtinFile, targetFile, finalFileHash)) {
-                            logger.debug("using builtin file " + fileName);
+                        if (tryCopyBuiltinAsset(assets, task.fileName, task.targetFile, task.finalFileHash)) {
+                            logger.debug("using builtin asset " + task.fileName);
+                        } else if (tryCopyBuiltinFile(task.builtinFile, task.targetFile, task.finalFileHash)) {
+                            logger.debug("using builtin file " + task.fileName);
                         } else if (
-                            tryCopyFromCache(cacheFile, targetFile, finalFileHash) ||
-                            (legacyCacheFile != null && tryCopyFromCache(legacyCacheFile, targetFile, finalFileHash))
+                            tryCopyFromCache(task.cacheFile, task.targetFile, task.finalFileHash) ||
+                            (task.legacyCacheFile != null && tryCopyFromCache(task.legacyCacheFile, task.targetFile, task.finalFileHash))
                         ) {
-                            logger.debug("already cached " + fileName);
+                            logger.debug("already cached " + task.fileName);
                         } else {
                             downloadAndVerify(
-                                downloadUrl,
-                                targetFile,
-                                cacheFile,
-                                finalFileHash,
+                                task.downloadUrl,
+                                task.targetFile,
+                                task.cacheFile,
+                                task.finalFileHash,
                                 sessionKey,
                                 publicKey,
-                                finalIsBrotli,
-                                fileName
+                                task.isBrotli,
+                                task.fileName
                             );
                         }
 
@@ -572,8 +635,8 @@ public class DownloadService extends Worker {
                         int percent = calcTotalPercent(completed, totalFiles);
                         setProgress(percent);
                     } catch (Exception e) {
-                        logger.error("Error processing file: " + fileName + " " + e.getMessage());
-                        sendStatsAsync("download_manifest_file_fail", version + ":" + fileName);
+                        logger.error("Error processing file: " + task.fileName + " " + e.getMessage());
+                        sendStatsAsync("download_manifest_file_fail", version + ":" + task.fileName);
                         hasError.set(true);
                     }
                 });
@@ -620,8 +683,20 @@ public class DownloadService extends Worker {
         String dest,
         String version,
         String sessionKey,
-        String checksum
+        String checksum,
+        String publicKey
     ) {
+        if (publicKey != null && !publicKey.isEmpty() && !CryptoCipher.isValidSessionKey(sessionKey)) {
+            logger.error("Public key present but no valid session key provided");
+            sendStatsAsync("session_key_required", version);
+            throw new RuntimeException("Session key required when public key is present");
+        }
+        if (checksum == null || checksum.isEmpty()) {
+            logger.error("No checksum provided");
+            sendStatsAsync("checksum_required", version);
+            throw new RuntimeException("Checksum required");
+        }
+
         // Send stats for zip download start
         sendStatsAsync("download_zip_start", version);
 
@@ -919,7 +994,7 @@ public class DownloadService extends Worker {
                 }
             }
 
-            boolean needDecrypt = publicKey != null && !publicKey.isEmpty() && sessionKey != null && !sessionKey.isEmpty();
+            boolean needDecrypt = publicKey != null && !publicKey.isEmpty() && CryptoCipher.isValidSessionKey(sessionKey);
             File source = partial;
             if (needDecrypt) {
                 workFile = new File(cacheFolder, "work_" + UUID.randomUUID() + "_" + targetFile.getName() + ".tmp");
