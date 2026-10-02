@@ -228,7 +228,7 @@ public class DownloadService extends Worker {
         return CapgoUpdater.resolvePathInsideDirectory(builtinFolder, resolvedName);
     }
 
-    /** APK web assets live in assets/public/; strip .br so store files match. */
+    /** Cordova APK web assets live in assets/www/; strip .br so store files match. */
     static String resolveBuiltinAssetPath(final String fileName) throws IOException {
         final File base = new File("/capgo-builtin-assets");
         final File resolved = resolveManifestBuiltinFile(base, fileName);
@@ -238,7 +238,7 @@ public class DownloadService extends Worker {
         if (!resolvedPath.startsWith(normalizedBasePath)) {
             throw new IOException("Invalid manifest file path: " + fileName);
         }
-        return "public/" + resolvedPath.substring(normalizedBasePath.length()).replace(File.separatorChar, '/');
+        return "www/" + resolvedPath.substring(normalizedBasePath.length()).replace(File.separatorChar, '/');
     }
 
     static boolean copyStreamIfChecksumMatches(final InputStream input, final File dest, final String expectedHash) throws IOException {
