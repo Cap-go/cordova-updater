@@ -307,7 +307,7 @@ public class SessionKeyRequiredTest {
 
             assertTrue(updater.getSentStatsActions().contains("session_key_required"));
             final BundleInfo pending = updater.getBundleInfoByName("2.0.0");
-            assertTrue(pending != null && pending.isPending());
+            assertTrue(pending != null && pending.getStatus() == BundleStatus.PENDING);
         }
     }
 
