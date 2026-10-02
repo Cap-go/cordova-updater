@@ -3179,6 +3179,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         if self.keepUrlPathAfterReload {
             self.addKeepUrlPathDocumentStartScript(to: controller, enabled: true)
         }
+        self.webViewStatsReporter?.reinstallDocumentStartScript(on: webView)
     }
 
     private func armReadyGuard(webView: WKWebView?) {

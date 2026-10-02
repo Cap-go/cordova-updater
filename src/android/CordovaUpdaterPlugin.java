@@ -4499,7 +4499,6 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             return null;
         }
         final long generation = ++this.activeBackgroundDownloadGeneration;
-        this.implementation.setBackgroundDownloadSettlementToken(generation);
         final boolean plannedDirectUpdate = this.shouldUseDirectUpdate();
         final boolean initialDirectUpdateAllowed = this.isDirectUpdateCurrentlyAllowed(plannedDirectUpdate);
         final String messageUpdate = initialDirectUpdateAllowed
@@ -4790,7 +4789,8 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                                             sessionKey,
                                             checksum,
                                             manifest,
-                                            CordovaUpdaterPlugin.this.shouldAutoSetNextBundle()
+                                            CordovaUpdaterPlugin.this.shouldAutoSetNextBundle(),
+                                            generation
                                         );
                                     } else {
                                         // Handle single file download (existing code)
@@ -4800,7 +4800,8 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                                             sessionKey,
                                             checksum,
                                             null,
-                                            CordovaUpdaterPlugin.this.shouldAutoSetNextBundle()
+                                            CordovaUpdaterPlugin.this.shouldAutoSetNextBundle(),
+                                            generation
                                         );
                                     }
                                 } catch (final Exception e) {

@@ -261,14 +261,8 @@ public class CapgoUpdater {
     /** Launch downloads have no waiter. The plugin emits appReady from here when WorkManager settles. */
     void backgroundDownloadSettled(final BundleInfo bundle, final String status, final long settlementToken) {}
 
-    private long backgroundDownloadSettlementToken = 0L;
-
-    public void setBackgroundDownloadSettlementToken(final long settlementToken) {
-        this.backgroundDownloadSettlementToken = settlementToken;
-    }
-
-    private void settleBackgroundDownload(final BundleInfo bundle, final String status) {
-        this.backgroundDownloadSettled(bundle, status, this.backgroundDownloadSettlementToken);
+    private void settleBackgroundDownload(final BundleInfo bundle, final String status, final long settlementToken) {
+        this.backgroundDownloadSettled(bundle, status, settlementToken);
     }
 
     void notifyListeners(final String id, final Map<String, Object> res) {}
@@ -962,14 +956,14 @@ public class CapgoUpdater {
         final String sessionKey,
         final String checksum,
         final JSONArray manifest,
-        final boolean setNext
+        final boolean setNext,
+        final long settlementToken
     ) {
         if (this.activity == null) {
             logger.error("Activity is null, cannot observe work progress");
             return;
         }
         observedDownloadVersions.add(version);
-        final long settlementToken = this.backgroundDownloadSettlementToken;
         observeWorkProgress(this.activity, id, version, setNext, settlementToken);
 
         if (manifest != null) {
@@ -1595,6 +1589,18 @@ public class CapgoUpdater {
         final JSONArray manifest,
         final boolean setNext
     ) {
+        this.downloadBackground(url, version, sessionKey, checksum, manifest, setNext, 0L);
+    }
+
+    public void downloadBackground(
+        final String url,
+        final String version,
+        final String sessionKey,
+        final String checksum,
+        final JSONArray manifest,
+        final boolean setNext,
+        final long settlementToken
+    ) {
         try {
             this.requireSessionKeyForEncryptedUpdate(sessionKey);
             if (manifest == null) {
@@ -1602,7 +1608,7 @@ public class CapgoUpdater {
             }
         } catch (final IOException e) {
             logger.error("Download blocked: " + e.getMessage());
-            this.settleBackgroundDownload(null, launchDownloadReadyStatus(false, setNext));
+            this.settleBackgroundDownload(null, launchDownloadReadyStatus(false, setNext), settlementToken);
             return;
         }
         if (!this.runDownloadGateQuiet()) {
@@ -1618,7 +1624,11 @@ public class CapgoUpdater {
                 // Cancel the failed download and allow retry
                 if (!DownloadWorkerManager.cancelVersionDownloadAndAwait(this.activity, version)) {
                     logger.error("Failed to cancel previous download before retry");
-                    this.settleBackgroundDownload(this.getCurrentBundle(), launchDownloadReadyStatus(false, setNext));
+                    this.settleBackgroundDownload(
+                        this.getCurrentBundle(),
+                        launchDownloadReadyStatus(false, setNext),
+                        settlementToken
+                    );
                     return;
                 }
                 logger.info("Retrying failed download for version: " + version);
@@ -1626,7 +1636,11 @@ public class CapgoUpdater {
                 // Left over from a killed process: nothing would finish it or release the launch, so start over.
                 if (!DownloadWorkerManager.cancelVersionDownloadAndAwait(this.activity, version)) {
                     logger.error("Failed to cancel orphaned download before restarting it");
-                    this.settleBackgroundDownload(this.getCurrentBundle(), launchDownloadReadyStatus(false, setNext));
+                    this.settleBackgroundDownload(
+                        this.getCurrentBundle(),
+                        launchDownloadReadyStatus(false, setNext),
+                        settlementToken
+                    );
                     return;
                 }
                 logger.info("Restarting download orphaned by a previous process for version: " + version);
@@ -1640,7 +1654,7 @@ public class CapgoUpdater {
         this.notifyDownload(id, 0);
         this.notifyDownload(id, 5);
 
-        this.download(id, url, this.randomString(), version, sessionKey, checksum, manifest, setNext);
+        this.download(id, url, this.randomString(), version, sessionKey, checksum, manifest, setNext, settlementToken);
     }
 
     public BundleInfo download(final String url, final String version, final String sessionKey, final String checksum) throws IOException {
@@ -1667,7 +1681,7 @@ public class CapgoUpdater {
         downloadFutures.put(id, downloadFuture);
 
         // Start the download
-        this.download(id, url, dest, version, sessionKey, checksum, null, false);
+        this.download(id, url, dest, version, sessionKey, checksum, null, false, 0L);
 
         // Wait for completion without timeout
         try {
@@ -1723,7 +1737,7 @@ public class CapgoUpdater {
         downloadFutures.put(id, downloadFuture);
 
         // Start the download
-        this.download(id, url, dest, version, sessionKey, checksum, manifest, false);
+        this.download(id, url, dest, version, sessionKey, checksum, manifest, false, 0L);
 
         // Wait for completion without timeout
         try {
