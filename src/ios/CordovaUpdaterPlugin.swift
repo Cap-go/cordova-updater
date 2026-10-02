@@ -201,7 +201,6 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     let semaphoreReady = DispatchSemaphore(value: 0)
     private var readyGuardArmed = false
     private var readyGeneration = 0
-    private var readyGenerationUserScript: WKUserScript?
 
     private var delayUpdateUtils: DelayUpdateUtils!
 
@@ -476,13 +475,21 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         )
     }
 
-    private func syncKeepUrlPathFlag(enabled: Bool) {
-        let script: String
+    private func keepUrlPathFlagScriptSource(enabled: Bool) -> String {
         if enabled {
-            script = "(function(){ try { localStorage.setItem('\(keepUrlPathFlagKey)', '1'); } catch (err) {} window.__capgoKeepUrlPathAfterReload = true; var evt; try { evt = new CustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', { detail: { enabled: true } }); } catch (e) { evt = document.createEvent('CustomEvent'); evt.initCustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', false, false, { enabled: true }); } window.dispatchEvent(evt); })();"
-        } else {
-            script = "(function(){ try { localStorage.removeItem('\(keepUrlPathFlagKey)'); } catch (err) {} delete window.__capgoKeepUrlPathAfterReload; var evt; try { evt = new CustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', { detail: { enabled: false } }); } catch (e) { evt = document.createEvent('CustomEvent'); evt.initCustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', false, false, { enabled: false }); } window.dispatchEvent(evt); })();"
+            return "(function(){ try { localStorage.setItem('\(keepUrlPathFlagKey)', '1'); } catch (err) {} window.__capgoKeepUrlPathAfterReload = true; var evt; try { evt = new CustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', { detail: { enabled: true } }); } catch (e) { evt = document.createEvent('CustomEvent'); evt.initCustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', false, false, { enabled: true }); } window.dispatchEvent(evt); })();"
         }
+        return "(function(){ try { localStorage.removeItem('\(keepUrlPathFlagKey)'); } catch (err) {} delete window.__capgoKeepUrlPathAfterReload; var evt; try { evt = new CustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', { detail: { enabled: false } }); } catch (e) { evt = document.createEvent('CustomEvent'); evt.initCustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', false, false, { enabled: false }); } window.dispatchEvent(evt); })();"
+    }
+
+    private func addKeepUrlPathDocumentStartScript(to controller: WKUserContentController, enabled: Bool) {
+        let userScript = WKUserScript(source: keepUrlPathFlagScriptSource(enabled: enabled), injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        controller.addUserScript(userScript)
+        self.keepUrlPathFlagLastValue = enabled
+    }
+
+    private func syncKeepUrlPathFlag(enabled: Bool) {
+        let script = keepUrlPathFlagScriptSource(enabled: enabled)
         DispatchQueue.main.async { [weak self] in
             guard let self = self, let webView = self.updaterWebView else {
                 return
@@ -3149,6 +3156,31 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         return "(function(){window.__CAPGO_READY_GEN=\(generation);})();"
     }
 
+    static func readyGenerationBootstrapScript(_ generation: Int) -> String {
+        return """
+        (function(){
+          var slot = { value: \(generation) };
+          window.__capgoReadyGenSlot = slot;
+          Object.defineProperty(window, '__CAPGO_READY_GEN', { get: function() { return slot.value; }, configurable: true });
+        })();
+        """
+    }
+
+    private func reinstallDocumentStartUserScripts(webView: WKWebView, readyGeneration: Int) {
+        let controller = webView.configuration.userContentController
+        controller.removeAllUserScripts()
+        self.keepUrlPathFlagLastValue = nil
+        let readyScript = WKUserScript(
+            source: CordovaUpdaterPlugin.readyGenerationBootstrapScript(readyGeneration),
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        controller.addUserScript(readyScript)
+        if self.keepUrlPathAfterReload {
+            self.addKeepUrlPathDocumentStartScript(to: controller, enabled: true)
+        }
+    }
+
     private func armReadyGuard(webView: WKWebView?) {
         self.readyGeneration += 1
         let generation = self.readyGeneration
@@ -3158,17 +3190,13 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             self.readyGuardArmed = false
             return
         }
-        let installScript = {
-            let source = CordovaUpdaterPlugin.readyGenerationScript(generation)
-            let userScript = WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
-            let controller = webView.configuration.userContentController
-            controller.addUserScript(userScript)
-            self.readyGenerationUserScript = userScript
+        let installScripts = {
+            self.reinstallDocumentStartUserScripts(webView: webView, readyGeneration: generation)
         }
         if Thread.isMainThread {
-            installScript()
+            installScripts()
         } else {
-            DispatchQueue.main.sync(execute: installScript)
+            DispatchQueue.main.sync(execute: installScripts)
         }
     }
 

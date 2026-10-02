@@ -244,6 +244,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     private Boolean isPreviousMainActivity = true;
 
     private volatile Thread backgroundDownloadTask;
+    private volatile long activeBackgroundDownloadGeneration = 0L;
     private final Object readyGuardLock = new Object();
     private Object readyGenerationScriptHandle;
     private volatile int readyGeneration = 0;
@@ -715,8 +716,8 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                 }
 
                 @Override
-                public void backgroundDownloadSettled(final BundleInfo bundle, final String status) {
-                    CordovaUpdaterPlugin.this.emitLaunchDownloadReady(bundle, status);
+                public void backgroundDownloadSettled(final BundleInfo bundle, final String status, final long settlementToken) {
+                    CordovaUpdaterPlugin.this.emitLaunchDownloadReady(bundle, status, settlementToken);
                 }
 
                 @Override
@@ -2011,7 +2012,15 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         this.logger = logger;
     }
 
-    void emitLaunchDownloadReady(final BundleInfo bundle, final String status) {
+    static boolean shouldAcceptBackgroundDownloadSettlement(final long settlementToken, final long activeGeneration) {
+        return settlementToken > 0L && settlementToken == activeGeneration;
+    }
+
+    void emitLaunchDownloadReady(final BundleInfo bundle, final String status, final long settlementToken) {
+        if (!shouldAcceptBackgroundDownloadSettlement(settlementToken, this.activeBackgroundDownloadGeneration)) {
+            logger.info("Ignoring stale background download settlement");
+            return;
+        }
         final BundleInfo readyBundle = bundle != null ? bundle : this.implementation.getCurrentBundle();
         if (readyBundle == null) {
             return;
@@ -4489,6 +4498,8 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         if (this.shouldBlockAutoUpdateForPreviewSession()) {
             return null;
         }
+        final long generation = ++this.activeBackgroundDownloadGeneration;
+        this.implementation.setBackgroundDownloadSettlementToken(generation);
         final boolean plannedDirectUpdate = this.shouldUseDirectUpdate();
         final boolean initialDirectUpdateAllowed = this.isDirectUpdateCurrentlyAllowed(plannedDirectUpdate);
         final String messageUpdate = initialDirectUpdateAllowed

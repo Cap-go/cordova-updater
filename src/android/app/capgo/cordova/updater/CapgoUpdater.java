@@ -259,7 +259,17 @@ public class CapgoUpdater {
     void directUpdateFinish(final BundleInfo latest) {}
 
     /** Launch downloads have no waiter. The plugin emits appReady from here when WorkManager settles. */
-    void backgroundDownloadSettled(final BundleInfo bundle, final String status) {}
+    void backgroundDownloadSettled(final BundleInfo bundle, final String status, final long settlementToken) {}
+
+    private long backgroundDownloadSettlementToken = 0L;
+
+    public void setBackgroundDownloadSettlementToken(final long settlementToken) {
+        this.backgroundDownloadSettlementToken = settlementToken;
+    }
+
+    private void settleBackgroundDownload(final BundleInfo bundle, final String status) {
+        this.backgroundDownloadSettled(bundle, status, this.backgroundDownloadSettlementToken);
+    }
 
     void notifyListeners(final String id, final Map<String, Object> res) {}
 
@@ -753,16 +763,23 @@ public class CapgoUpdater {
         final boolean directInstall,
         final boolean previewSession,
         final boolean setNext,
-        final BundleInfo bundle
+        final BundleInfo bundle,
+        final long settlementToken
     ) {
         if (!shouldNotifyLaunchDownloadReady(awaitedByCaller, success, directInstall, previewSession)) {
             return;
         }
         final BundleInfo readyBundle = bundle != null ? bundle : this.getCurrentBundle();
-        this.backgroundDownloadSettled(readyBundle, launchDownloadReadyStatus(success, setNext));
+        this.backgroundDownloadSettled(readyBundle, launchDownloadReadyStatus(success, setNext), settlementToken);
     }
 
-    private void observeWorkProgress(Context context, String id, String observedVersion, boolean setNext) {
+    private void observeWorkProgress(
+        Context context,
+        String id,
+        String observedVersion,
+        boolean setNext,
+        final long settlementToken
+    ) {
         if (!(context instanceof LifecycleOwner)) {
             logger.error("Context is not a LifecycleOwner, cannot observe work progress");
             return;
@@ -797,7 +814,14 @@ public class CapgoUpdater {
                                 logger.warn("Direct update download is retrying, continuing launch on the current bundle");
                                 // Same fallback as the autoSplashscreen timeout: a later success installs on next background.
                                 CapgoUpdater.this.directUpdate = false;
-                                io.execute(() -> backgroundDownloadSettled(getCurrentBundle(), launchDownloadReadyStatus(false, false)));
+                                io.execute(
+                                    () ->
+                                        backgroundDownloadSettled(
+                                            getCurrentBundle(),
+                                            launchDownloadReadyStatus(false, false),
+                                            settlementToken
+                                        )
+                                );
                             }
                             break;
                         case RUNNING:
@@ -854,7 +878,15 @@ public class CapgoUpdater {
                                 }
                                 final BundleInfo readyBundle = success && setNext ? resultBundle : null;
                                 if (!launchReleasedWhileRetrying.get()) {
-                                    notifyLaunchDownloadReady(future != null, success, directInstall, previewSession, setNext, readyBundle);
+                                    notifyLaunchDownloadReady(
+                                        future != null,
+                                        success,
+                                        directInstall,
+                                        previewSession,
+                                        setNext,
+                                        readyBundle,
+                                        settlementToken
+                                    );
                                 }
                             });
                             break;
@@ -896,7 +928,15 @@ public class CapgoUpdater {
                                     failedFuture.complete(failedBundle);
                                 }
                                 if (!launchReleasedWhileRetrying.get()) {
-                                    notifyLaunchDownloadReady(failedFuture != null, false, false, false, false, null);
+                                    notifyLaunchDownloadReady(
+                                        failedFuture != null,
+                                        false,
+                                        false,
+                                        false,
+                                        false,
+                                        null,
+                                        settlementToken
+                                    );
                                 }
                             });
                             break;
@@ -929,7 +969,8 @@ public class CapgoUpdater {
             return;
         }
         observedDownloadVersions.add(version);
-        observeWorkProgress(this.activity, id, version, setNext);
+        final long settlementToken = this.backgroundDownloadSettlementToken;
+        observeWorkProgress(this.activity, id, version, setNext, settlementToken);
 
         if (manifest != null) {
             DataManager.getInstance().setManifest(id, manifest);
@@ -1561,7 +1602,7 @@ public class CapgoUpdater {
             }
         } catch (final IOException e) {
             logger.error("Download blocked: " + e.getMessage());
-            this.backgroundDownloadSettled(null, launchDownloadReadyStatus(false, setNext));
+            this.settleBackgroundDownload(null, launchDownloadReadyStatus(false, setNext));
             return;
         }
         if (!this.runDownloadGateQuiet()) {
@@ -1577,7 +1618,7 @@ public class CapgoUpdater {
                 // Cancel the failed download and allow retry
                 if (!DownloadWorkerManager.cancelVersionDownloadAndAwait(this.activity, version)) {
                     logger.error("Failed to cancel previous download before retry");
-                    this.backgroundDownloadSettled(this.getCurrentBundle(), launchDownloadReadyStatus(false, setNext));
+                    this.settleBackgroundDownload(this.getCurrentBundle(), launchDownloadReadyStatus(false, setNext));
                     return;
                 }
                 logger.info("Retrying failed download for version: " + version);
@@ -1585,7 +1626,7 @@ public class CapgoUpdater {
                 // Left over from a killed process: nothing would finish it or release the launch, so start over.
                 if (!DownloadWorkerManager.cancelVersionDownloadAndAwait(this.activity, version)) {
                     logger.error("Failed to cancel orphaned download before restarting it");
-                    this.backgroundDownloadSettled(this.getCurrentBundle(), launchDownloadReadyStatus(false, setNext));
+                    this.settleBackgroundDownload(this.getCurrentBundle(), launchDownloadReadyStatus(false, setNext));
                     return;
                 }
                 logger.info("Restarting download orphaned by a previous process for version: " + version);
