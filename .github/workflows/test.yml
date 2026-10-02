@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - renovate/**
+      - cursor/**
   pull_request:
     branches: [main]
   workflow_dispatch:
