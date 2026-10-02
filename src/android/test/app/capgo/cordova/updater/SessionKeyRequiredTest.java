@@ -262,10 +262,10 @@ public class SessionKeyRequiredTest {
         final StatsTrackingCapgoUpdater updater = new StatsTrackingCapgoUpdater();
         updater.setPublicKey(fixturePublicKey);
 
-        updater.downloadBackground("https://example.com/update.zip", "1.0.0", "", "checksum", null);
+        updater.downloadBackground("https://example.com/update.zip", "9.9.9-session-key-guard", "", "checksum", null);
 
         assertTrue(updater.getSentStatsActions().contains("session_key_required"));
-        assertEquals(null, updater.getBundleInfoByName("1.0.0"));
+        assertEquals(null, updater.getBundleInfoByName("9.9.9-session-key-guard"));
     }
 
     @Test
@@ -306,7 +306,8 @@ public class SessionKeyRequiredTest {
             invokeBackgroundDownload(plugin);
 
             assertTrue(updater.getSentStatsActions().contains("session_key_required"));
-            assertEquals(null, updater.getBundleInfoByName("2.0.0"));
+            final BundleInfo pending = updater.getBundleInfoByName("2.0.0");
+            assertTrue(pending != null && pending.isPending());
         }
     }
 

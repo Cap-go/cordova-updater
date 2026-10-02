@@ -175,8 +175,10 @@ public class Logger {
         if let label = _labels[level] {
             log(atLevel: level, label: label, tag: tag, message: message)
             if let webView = self.webView {
-                DispatchQueue.main.async {
-                    if let script = self.buildWebViewConsoleScript(level: level, label: label, tag: tag, message: message) {
+                let logTag = self.tag
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    if let script = self.buildWebViewConsoleScript(level: level, label: label, tag: logTag, message: message) {
                         webView.evaluateJavaScript(script, completionHandler: nil)
                     }
                 }
