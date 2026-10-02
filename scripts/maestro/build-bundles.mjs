@@ -8,9 +8,11 @@ import {
   findScenario,
   getManifestDirectoryPath,
   getManifestMetadataPath,
+  getBundleChecksumPath,
   getBundleZipPath,
   manifestArtifactDir,
   repoRoot,
+  resolveAppScenarioId,
   scenarios,
 } from './scenarios.mjs';
 import { runCommand } from './command.mjs';
@@ -19,7 +21,7 @@ const scenarioSelection = process.argv[2]?.trim() || 'all';
 const selectedScenarios =
   scenarioSelection === 'all'
     ? Object.values(scenarios)
-    : [findScenario(scenarioSelection)].filter(Boolean);
+    : [findScenario(resolveAppScenarioId(scenarioSelection))].filter(Boolean);
 
 if (!selectedScenarios.length) {
   throw new Error(`Unknown Maestro scenario selection: ${scenarioSelection}`);
@@ -39,9 +41,15 @@ async function buildBundle({ scenarioId, directUpdate, release }) {
     env,
   });
 
-  await runCommand('zip', ['-0', '-q', '-r', getBundleZipPath(release.version), '.'], {
+  const zipPath = getBundleZipPath(release.version);
+
+  await runCommand('zip', ['-0', '-q', '-r', zipPath, '.'], {
     cwd: path.join(exampleAppDir, 'dist'),
   });
+
+  const zipContents = await readFile(zipPath);
+  const checksum = createHash('sha256').update(zipContents).digest('hex');
+  await writeFile(getBundleChecksumPath(release.version), checksum);
 
   await buildManifestArtifacts(release.version);
 }
@@ -98,21 +106,10 @@ await runCommand('bun', ['run', 'build'], {
   cwd: repoRoot,
   env: process.env,
 });
-const exampleNodeModules = path.join(exampleAppDir, 'node_modules');
-try {
-  await runCommand('bun', ['install'], {
-    cwd: exampleAppDir,
-    env: process.env,
-  });
-} catch (error) {
-  console.warn(
-    `[maestro] bun install failed, retrying with npm ci: ${error instanceof Error ? error.message : String(error)}`,
-  );
-  await runCommand('npm', ['ci'], {
-    cwd: exampleAppDir,
-    env: process.env,
-  });
-}
+await runCommand('bun', ['install'], {
+  cwd: exampleAppDir,
+  env: process.env,
+});
 
 for (const scenario of selectedScenarios) {
   for (const release of scenario.releases) {

@@ -4,17 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
-TRIPLE="arm64-apple-ios16.0-simulator"
+SIMULATOR_ID=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/{print $2; exit}')
 
-if [[ -n "${SIMULATOR_ID:-}" ]]; then
-  xcodebuild test -scheme CapgoCordovaUpdater -destination "id=${SIMULATOR_ID}" "$@"
-else
-  SIMULATOR_ID="$(xcrun simctl list devices available 2>/dev/null | awk -F '[()]' '/iPhone/{print $2; exit}')"
-  if [[ -n "${SIMULATOR_ID}" ]]; then
-    xcodebuild test -scheme CapgoCordovaUpdater -destination "id=${SIMULATOR_ID}" "$@"
-  else
-    echo "No iPhone simulator available; compiling iOS tests with swift build." >&2
-    swift build --sdk "$SDK" --triple "$TRIPLE" --target CordovaUpdaterPluginTests
-  fi
+if [[ -z "${SIMULATOR_ID:-}" ]]; then
+  echo "No available iPhone simulator found. Please install one via Xcode." >&2
+  exit 1
 fi
+
+xcodebuild test -scheme CapgoCapacitorUpdater -destination "id=${SIMULATOR_ID}" "$@"

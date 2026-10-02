@@ -1,7 +1,7 @@
 appId: app.capgo.updater
 ---
 - extendedWaitUntil:
-    visible: '@capgo/cordova-updater'
+    visible: '@capgo/capacitor-updater'
     timeout: 90000
 - scrollUntilVisible:
     element:

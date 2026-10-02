@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
         id="@capgo/cordova-updater"
-        version="8.1.3">
+        version="8.2.0">
 
     <name>Updater</name>
     <description>Cordova plugin for Capgo live updates (OTA).</description>
@@ -126,6 +126,7 @@
         <source-file src="src/android/app/capgo/cordova/updater/ShakeDetector.java" target-dir="src/app/capgo/cordova/updater"/>
         <source-file src="src/android/app/capgo/cordova/updater/ShakeMenu.java" target-dir="src/app/capgo/cordova/updater"/>
         <source-file src="src/android/app/capgo/cordova/updater/ThreeFingerPinchDetector.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/Version.java" target-dir="src/app/capgo/cordova/updater"/>
         <source-file src="src/android/app/capgo/cordova/updater/compat/JSArray.java" target-dir="src/app/capgo/cordova/updater/compat"/>
         <source-file src="src/android/app/capgo/cordova/updater/compat/JSObject.java" target-dir="src/app/capgo/cordova/updater/compat"/>
         <source-file src="src/android/app/capgo/cordova/updater/compat/PluginCall.java" target-dir="src/app/capgo/cordova/updater/compat"/>
@@ -195,13 +196,9 @@
         <source-file src="src/ios/UpdaterSchemeHandler.swift"/>
         <source-file src="src/ios/UserDefaultsExtension.swift"/>
         <source-file src="src/ios/WebViewStatsReporter.swift"/>
-
-        <podspec>
-            <pods use-frameworks="true">
-                <pod name="Alamofire" spec="~> 5.11.0" />
-                <pod name="ZIPFoundation" spec="~> 0.9.20" />
-                <pod name="Version" spec="0.8.0" />
-            </pods>
-        </podspec>
+        <source-file src="src/ios/CapgoSemanticVersion.swift"/>
+        <source-file src="src/ios/RedirectPolicyDelegate.swift"/>
+        <source-file src="src/ios/ZipArchiveReader.swift"/>
+        <source-file src="src/ios/ZipCentralDirectory.swift"/>
     </platform>
 </plugin>

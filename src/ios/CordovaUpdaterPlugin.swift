@@ -10,7 +10,6 @@ import Cordova
 #endif
 import UIKit
 import WebKit
-import Version
 
 /**
  * Please read the Capacitor iOS Plugin Development Guide
@@ -88,7 +87,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     }()
 
                 public var implementation = CapgoUpdater()
-    private let pluginVersion: String = "8.1.3"
+    private let pluginVersion: String = "8.2.0"
     static let updateUrlDefault = "https://plugin.capgo.app/updates"
     static let statsUrlDefault = "https://plugin.capgo.app/stats"
     static let channelUrlDefault = "https://plugin.capgo.app/channel_self"
@@ -139,7 +138,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     // Note: DELAY_CONDITION_PREFERENCES is now defined in DelayUpdateUtils.DELAY_CONDITION_PREFERENCES
     private var updateUrl = ""
     private var backgroundTaskID: UIBackgroundTaskIdentifier = UIBackgroundTaskIdentifier.invalid
-    private var currentVersionNative: Version = "0.0.0"
+    private var currentVersionNative = CapgoSemanticVersion(major: 0, minor: 0, patch: 0)
     private var currentBuildVersion: String = "0"
     private var autoUpdate = false
     private var autoUpdateMode = CordovaUpdaterPlugin.autoUpdateModeOff
@@ -200,6 +199,8 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     private var isLeavingPreviewForIncomingLink = false
     private var previewTransitionClearWorkItem: DispatchWorkItem?
     let semaphoreReady = DispatchSemaphore(value: 0)
+    private var readyGuardArmed = false
+    private var readyGeneration = 0
 
     private var delayUpdateUtils: DelayUpdateUtils!
 
@@ -243,7 +244,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             fatalError("Cannot get version name")
         }
         do {
-            currentVersionNative = try Version(versionName)
+            currentVersionNative = try CapgoSemanticVersion(versionName)
         } catch {
             logger.error("Cannot parse versionName \(versionName)")
         }
@@ -1692,6 +1693,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         let id = self.implementation.getCurrentBundleId()
         let dest = self.currentReloadDestination()
         logger.info("Reloading \(id)")
+        self.armReadyGuard(webView: self.updaterWebView)
 
         if self.keepUrlPathAfterReload {
             self.syncKeepUrlPathFlag(enabled: true)
@@ -3123,7 +3125,62 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         ])
     }
 
+    static func shouldAcceptReadyCall(guardArmed: Bool, expectedGeneration: Int, reportedGeneration: Int?) -> Bool {
+        if !guardArmed {
+            return true
+        }
+        guard let reportedGeneration else {
+            return false
+        }
+        return reportedGeneration == expectedGeneration
+    }
+
+    static func readyGenerationScript(_ generation: Int) -> String {
+        return "(function(){window.__CAPGO_READY_GEN=\(generation);})();"
+    }
+
+    private func armReadyGuard(webView: WKWebView?) {
+        let generation = self.readyGeneration + 1
+        guard let webView else {
+            logger.warn("Cannot stamp notifyAppReady generation without a webview")
+            self.readyGuardArmed = false
+            return
+        }
+        let userScript = WKUserScript(
+            source: CordovaUpdaterPlugin.readyGenerationScript(generation),
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        webView.configuration.userContentController.addUserScript(userScript)
+        self.readyGeneration = generation
+        self.readyGuardArmed = true
+    }
+
+    private func reportedReadyGeneration(_ call: CAPPluginCall) -> Int? {
+        if let value = call.getValue("loadGeneration") as? Int {
+            return value
+        }
+        if let number = call.getValue("loadGeneration") as? NSNumber {
+            return number.intValue
+        }
+        return nil
+    }
+
+    private func acceptsReadyCall(_ call: CAPPluginCall) -> Bool {
+        let reported = self.readyGuardArmed ? self.reportedReadyGeneration(call) : nil
+        return CordovaUpdaterPlugin.shouldAcceptReadyCall(
+            guardArmed: self.readyGuardArmed,
+            expectedGeneration: self.readyGeneration,
+            reportedGeneration: reported
+        )
+    }
+
     func notifyAppReady(_ call: CAPPluginCall) {
+        if !self.acceptsReadyCall(call) {
+            logger.info("Ignoring notifyAppReady from a page that is no longer current")
+            call.resolve(["bundle": self.implementation.getCurrentBundle().toJSON()])
+            return
+        }
         self.semaphoreDown()
         let bundle = self.implementation.getCurrentBundle()
         self.implementation.setSuccess(bundle: bundle, autoDeletePrevious: self.autoDeletePrevious)
@@ -4613,8 +4670,8 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
                         // Determine update availability by comparing versions
                         if let availableVersion = availableVersion {
                             do {
-                                let currentVer = try Version(currentVersionName)
-                                let availableVer = try Version(availableVersion)
+                                let currentVer = try CapgoSemanticVersion(currentVersionName)
+                                let availableVer = try CapgoSemanticVersion(availableVersion)
                                 if availableVer > currentVer {
                                     result["updateAvailability"] = AppUpdateAvailability.updateAvailable.rawValue
                                 } else {

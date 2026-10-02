@@ -13,7 +13,7 @@ import os.log
 /// via `.sonarcloud.properties` multicriteria because `.rsaEncryptionRaw` is
 /// intentional wire compatibility with Node `privateEncrypt` / `publicDecrypt`.
 enum CapgoRawRsa {
-    private static let log = OSLog(subsystem: "app.capgo.cordova.updater", category: "RSA")
+    private static let log = OSLog(subsystem: "ee.forgr.capacitor_updater", category: "RSA")
 
     static func supportsCapgoRecovery(key: SecKey) -> Bool {
         SecKeyGetBlockSize(key) == 256

@@ -1,15 +1,15 @@
 appId: app.capgo.updater
 ---
 - extendedWaitUntil:
-    visible: '@capgo/cordova-updater'
+    visible: '@capgo/capacitor-updater'
     timeout: 180000
-- assertVisible: '@capgo/cordova-updater'
+- assertVisible: '@capgo/capacitor-updater'
 - extendedWaitUntil:
     visible: '.*Harness: ready.*'
     timeout: 120000
 - scrollUntilVisible:
     element:
-      text: '@capgo/cordova-updater'
+      text: '@capgo/capacitor-updater'
     direction: UP
     timeout: 120000
 - scrollUntilVisible:

@@ -185,6 +185,7 @@ final class SessionKeyRequiredTests: XCTestCase {
         implementation.setPublicKey("")
         let manifest = [ManifestEntry(file_name: "index.html", file_hash: "abc", download_url: "http://[")]
 
+        // Invalid URL fails fast after the session-key gate, proving the gate did not block.
         XCTAssertThrowsError(try implementation.downloadManifest(manifest: manifest, version: "1.0.0", sessionKey: ""))
         XCTAssertFalse(implementation.sentStatsActions.contains("session_key_required"))
     }

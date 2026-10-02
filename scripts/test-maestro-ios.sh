@@ -7,6 +7,7 @@ RESULTS_DIR="${CAPGO_MAESTRO_RESULTS_DIR:-$ROOT_DIR/maestro-results-ios}"
 SKIP_BUILD="${CAPGO_MAESTRO_SKIP_BUILD:-0}"
 SKIP_BUNDLE_BUILD="${CAPGO_MAESTRO_SKIP_BUNDLE_BUILD:-0}"
 RUN_NATIVE_RESET="${CAPGO_MAESTRO_RUN_NATIVE_RESET:-0}"
+CLEAR_SWIFTPM_CAPACITOR_ARTIFACT_CACHE="${CAPGO_MAESTRO_CLEAR_SWIFTPM_CAPACITOR_ARTIFACT_CACHE:-0}"
 ASSUME_CLEAN_INSTALL="${CAPGO_MAESTRO_IOS_ASSUME_CLEAN_INSTALL:-0}"
 SCENARIO_ID="${CAPGO_MAESTRO_SMOKE_SCENARIO:-manual-zip}"
 FLOW_PATH="$ROOT_DIR/.maestro/ios/example-app-smoke.yaml"
@@ -27,7 +28,7 @@ SERVER_PID=""
 export MAESTRO_DRIVER_STARTUP_TIMEOUT="${MAESTRO_DRIVER_STARTUP_TIMEOUT:-600000}"
 export MAESTRO_CLI_NO_ANALYTICS="${MAESTRO_CLI_NO_ANALYTICS:-1}"
 MAESTRO_TEST_RETRIES="${CAPGO_MAESTRO_TEST_RETRIES:-3}"
-FLOW_RETRY_PATTERN="iOS driver not ready in time|Failed to connect to /127\\.0\\.0\\.1:[0-9]+|Connection refused|Broken pipe|Request for viewHierarchy failed, because of unknown reason|XCTestDriver request failed\\. Status code: 500, path: viewHierarchy|Application .* is not running|Detected app crash|App crashed or stopped|smoke-sequence:success.*is visible|failed to terminate dev\\.mobile\\.maestro-driver-iosUITests\\.xctrunner|found nothing to terminate|Assertion is false: \"@capgo/cordova-updater\" is visible|Assertion is false: \".*Harness: ready.*\" is visible|Assertion is false: \".*persisted:success.*\" is visible"
+FLOW_RETRY_PATTERN="iOS driver not ready in time|Failed to connect to /127\\.0\\.0\\.1:[0-9]+|Connection refused|Broken pipe|Request for viewHierarchy failed, because of unknown reason|XCTestDriver request failed\\. Status code: 500, path: viewHierarchy|Application .* is not running|Detected app crash|App crashed or stopped|smoke-sequence:success.*is visible|failed to terminate dev\\.mobile\\.maestro-driver-iosUITests\\.xctrunner|found nothing to terminate|Assertion is false: \"@capgo/capacitor-updater\" is visible|Assertion is false: \".*Harness: ready.*\" is visible|Assertion is false: \".*persisted:success.*\" is visible"
 export CAPGO_MAESTRO_DEVICE_BASE_URL="$DEVICE_SERVER_URL"
 
 default_simulator_id() {
@@ -35,17 +36,12 @@ default_simulator_id() {
 }
 
 default_app_path() {
-  if [[ -n "${CAPGO_MAESTRO_IOS_APP_PATH:-}" ]]; then
-    printf '%s\n' "$CAPGO_MAESTRO_IOS_APP_PATH"
+  if [[ -n "${DERIVED_DATA_PATH:-}" ]]; then
+    printf '%s\n' "$DERIVED_DATA_PATH/Build/Products/Debug-iphonesimulator/App.app"
     return 0
   fi
 
-  local app_path=""
-  app_path="$(ls -td "$EXAMPLE_DIR/platforms/ios/build/emulator/"*.app 2>/dev/null | head -n 1 || true)"
-  if [[ -z "$app_path" ]]; then
-    app_path="$(find "$EXAMPLE_DIR/platforms/ios" -name '*.app' -type d 2>/dev/null | head -n 1 || true)"
-  fi
-  printf '%s\n' "$app_path"
+  ls -td "$HOME"/Library/Developer/Xcode/DerivedData/*/Build/Products/Debug-iphonesimulator/App.app 2>/dev/null | head -n 1 || true
 }
 
 if [[ -n "${CAPGO_MAESTRO_IOS_DERIVED_DATA_PATH:-}" ]]; then
@@ -376,8 +372,8 @@ if ! command -v maestro >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v npx >/dev/null 2>&1; then
-  echo "npx is required to run Cordova CLI commands." >&2
+if ! command -v node >/dev/null 2>&1; then
+  echo "node is required to run Capacitor CLI commands." >&2
   exit 1
 fi
 
@@ -396,8 +392,8 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! (cd "$EXAMPLE_DIR" && npx cordova -v >/dev/null 2>&1); then
-  echo "Cordova CLI is required. Run bun install in example-app." >&2
+if ! node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 22 ? 0 : 1)"; then
+  echo "Node.js >=22 is required because Capacitor CLI no longer supports older versions." >&2
   exit 1
 fi
 
@@ -431,8 +427,16 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
   start_fake_server
   reset_fake_server
   bun "$ROOT_DIR/scripts/maestro/prepare-ios-scenario.mjs" "$SCENARIO_ID"
-  (cd "$EXAMPLE_DIR" && npx cordova build ios --emulator)
-  APP_PATH="$(default_app_path)"
+  if [[ "$CLEAR_SWIFTPM_CAPACITOR_ARTIFACT_CACHE" == "1" ]]; then
+    rm -rf "$HOME/Library/Caches/org.swift.swiftpm/artifacts"/https___github_com_ionic_team_capacitor_swift_pm_releases_download_8_0_0_*
+  fi
+  xcodebuild \
+    -project "$EXAMPLE_DIR/ios/App/App.xcodeproj" \
+    -scheme App \
+    -configuration Debug \
+    -destination "id=$SIMULATOR_ID" \
+    -derivedDataPath "$DERIVED_DATA_PATH" \
+    build
 else
   assert_prebuilt_maestro_assets
   start_fake_server

@@ -36,7 +36,6 @@ import com.google.android.play.core.install.InstallStateUpdatedListener;
 import com.google.android.play.core.install.model.AppUpdateType;
 import com.google.android.play.core.install.model.InstallStatus;
 import com.google.android.play.core.install.model.UpdateAvailability;
-import io.github.g00fy2.versioncompare.Version;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -171,7 +170,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     static final int APPLICATION_EXIT_REASON_USER_REQUESTED = 10;
     static final int APPLICATION_EXIT_REASON_DEPENDENCY_DIED = 12;
 
-    private final String pluginVersion = "8.1.3";
+    private final String pluginVersion = "8.2.0";
     private static final String DELAY_CONDITION_PREFERENCES = "";
 
     private SharedPreferences.Editor editor;
@@ -245,6 +244,9 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     private Boolean isPreviousMainActivity = true;
 
     private volatile Thread backgroundDownloadTask;
+    private final Object readyGuardLock = new Object();
+    private volatile int readyGeneration = 0;
+    private volatile boolean readyGuardArmed = false;
     private volatile Thread appReadyCheck;
     private volatile long downloadStartTimeMs = 0;
     private static final long DOWNLOAD_TIMEOUT_MS = 600000; // 10 minute timeout
@@ -2373,6 +2375,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                     CordovaUpdaterPlugin.this.editor,
                     DEFAULT_CHANNEL_PREF_KEY,
                     configDefaultChannel,
+                    CordovaUpdaterPlugin.this.allowSetDefaultChannel,
                     (res) -> {
                         JSObject jsRes = InternalUtils.mapToJSObject(res);
                         if (jsRes.has("error")) {
@@ -2631,6 +2634,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             this.syncKeepUrlPathFlag(true);
         }
         logger.info("Reloading: " + path);
+        this.stampReadyGenerationBeforeReload();
 
         if (pathHandler != null) {
             if (usingBuiltin) {
@@ -4073,9 +4077,95 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             this.periodCheckDelay
         );
     }
+    static boolean shouldAcceptReadyCall(
+        final boolean guardArmed,
+        final int expectedGeneration,
+        final boolean hasGeneration,
+        final int reportedGeneration
+    ) {
+        if (!guardArmed) {
+            return true;
+        }
+        return hasGeneration && reportedGeneration == expectedGeneration;
+    }
+
+    static String readyGenerationScript(final int generation) {
+        return "(function(){window.__CAPGO_READY_GEN=" + generation + ";})();";
+    }
+
+    private int armReadyGuard() {
+        synchronized (this.readyGuardLock) {
+            this.readyGeneration = this.readyGeneration + 1;
+            this.readyGuardArmed = true;
+            return this.readyGeneration;
+        }
+    }
+
+    private void disarmReadyGuard(final int generation) {
+        synchronized (this.readyGuardLock) {
+            if (this.readyGeneration == generation) {
+                this.readyGuardArmed = false;
+                logger.warn("Could not stamp notifyAppReady for the next page. Readiness guard disabled for this reload.");
+            }
+        }
+    }
+
+    private void stampReadyGenerationBeforeReload() {
+        final int generation = this.armReadyGuard();
+        final android.webkit.WebView webView = getUpdaterWebView();
+        if (webView == null) {
+            this.disarmReadyGuard(generation);
+            return;
+        }
+        cordova.getActivity().runOnUiThread(() -> {
+            if (!this.installReadyGenerationScript(webView, generation)) {
+                this.disarmReadyGuard(generation);
+            }
+        });
+    }
+
+    private boolean installReadyGenerationScript(final android.webkit.WebView webView, final int generation) {
+        try {
+            final Class<?> webViewFeature = Class.forName("androidx.webkit.WebViewFeature");
+            final String feature = (String) webViewFeature.getField("DOCUMENT_START_SCRIPT").get(null);
+            final Boolean supported = (Boolean) webViewFeature.getMethod("isFeatureSupported", String.class).invoke(null, feature);
+            if (!Boolean.TRUE.equals(supported)) {
+                return false;
+            }
+            final Class<?> webViewCompat = Class.forName("androidx.webkit.WebViewCompat");
+            webViewCompat
+                .getMethod("addDocumentStartJavaScript", android.webkit.WebView.class, String.class, Set.class)
+                .invoke(null, webView, readyGenerationScript(generation), java.util.Collections.singleton("*"));
+            return true;
+        } catch (final Exception e) {
+            logger.warn("Unable to stamp notifyAppReady generation: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean acceptsReadyCall(final PluginCall call) {
+        if (!this.readyGuardArmed) {
+            return true;
+        }
+        final JSONObject data = call.getData();
+        final boolean hasGeneration = data != null && data.has("loadGeneration");
+        final int reported = hasGeneration ? data.optInt("loadGeneration", -1) : -1;
+        return shouldAcceptReadyCall(this.readyGuardArmed, this.readyGeneration, hasGeneration, reported);
+    }
+
     public void notifyAppReady(final PluginCall call) {
         ensureBridgeSet();
         try {
+            if (!this.acceptsReadyCall(call)) {
+                logger.info("Ignoring notifyAppReady from a page that is no longer current");
+                final BundleInfo current = this.implementation.getCurrentBundle();
+                final app.capgo.cordova.updater.compat.JSObject ignored = new app.capgo.cordova.updater.compat.JSObject();
+                if (current != null) {
+                    ignored.put("bundle", InternalUtils.mapToJSObject(current.toJSONMap()));
+                }
+                call.resolve(ignored);
+                return;
+            }
             final BundleInfo bundle = this.implementation.getCurrentBundle();
             this.implementation.setSuccess(bundle, this.autoDeletePrevious);
             logger.info("Current bundle loaded successfully. ['notifyAppReady()' was called] " + bundle);

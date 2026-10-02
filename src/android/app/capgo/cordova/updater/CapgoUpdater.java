@@ -150,6 +150,9 @@ public class CapgoUpdater {
     }
 
     private final Map<String, CompletableFuture<BundleInfo>> downloadFutures = new ConcurrentHashMap<>();
+    // Versions whose WorkManager download is observed by this process. WorkManager persists work across a
+    // process kill, but the observer that finishes the download does not survive it.
+    private final Set<String> observedDownloadVersions = ConcurrentHashMap.newKeySet();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
 
     public CapgoUpdater(Logger logger) {
@@ -255,7 +258,48 @@ public class CapgoUpdater {
 
     void directUpdateFinish(final BundleInfo latest) {}
 
+    /** Launch downloads have no waiter. The plugin emits appReady from here when WorkManager settles. */
+    void backgroundDownloadSettled(final BundleInfo bundle, final String status) {}
+
     void notifyListeners(final String id, final Map<String, Object> res) {}
+
+    static boolean shouldNotifyLaunchDownloadReady(
+        final boolean awaitedByCaller,
+        final boolean success,
+        final boolean directInstall,
+        final boolean previewSession
+    ) {
+        if (awaitedByCaller) {
+            return false;
+        }
+        if (!success) {
+            return true;
+        }
+        return !directInstall && !previewSession;
+    }
+
+    static boolean shouldRestartOrphanedDownload(final boolean observedByThisProcess) {
+        return !observedByThisProcess;
+    }
+
+    static boolean shouldReleaseLaunchWhileRetrying(
+        final boolean awaitedByCaller,
+        final boolean setNext,
+        final boolean directUpdate,
+        final boolean previewSession
+    ) {
+        return !awaitedByCaller && setNext && directUpdate && !previewSession;
+    }
+
+    static String launchDownloadReadyStatus(final boolean success, final boolean setNext) {
+        if (!success) {
+            return "Error downloading file";
+        }
+        if (setNext) {
+            return "update downloaded, will install next background";
+        }
+        return "update downloaded, autoUpdate onlyDownload";
+    }
 
     public String randomString() {
         final StringBuilder sb = new StringBuilder(10);
@@ -703,12 +747,29 @@ public class CapgoUpdater {
         }
     }
 
-    private void observeWorkProgress(Context context, String id, boolean setNext) {
+    private void notifyLaunchDownloadReady(
+        final boolean awaitedByCaller,
+        final boolean success,
+        final boolean directInstall,
+        final boolean previewSession,
+        final boolean setNext,
+        final BundleInfo bundle
+    ) {
+        if (!shouldNotifyLaunchDownloadReady(awaitedByCaller, success, directInstall, previewSession)) {
+            return;
+        }
+        final BundleInfo readyBundle = bundle != null ? bundle : this.getCurrentBundle();
+        this.backgroundDownloadSettled(readyBundle, launchDownloadReadyStatus(success, setNext));
+    }
+
+    private void observeWorkProgress(Context context, String id, String observedVersion, boolean setNext) {
         if (!(context instanceof LifecycleOwner)) {
             logger.error("Context is not a LifecycleOwner, cannot observe work progress");
             return;
         }
 
+        final AtomicBoolean terminalHandled = new AtomicBoolean(false);
+        final AtomicBoolean launchReleasedWhileRetrying = new AtomicBoolean(false);
         activity.runOnUiThread(() -> {
             WorkManager.getInstance(context)
                 .getWorkInfosByTagLiveData(id)
@@ -719,11 +780,33 @@ public class CapgoUpdater {
                     Data progress = workInfo.getProgress();
 
                     switch (workInfo.getState()) {
+                        case ENQUEUED:
+                            // A run attempt already happened, so WorkManager scheduled a retry (network lost midway,
+                            // 5xx, ...). Retries back off without limit, so a direct install must not keep the launch
+                            // (and its splashscreen) blocked until the network comes back.
+                            if (
+                                workInfo.getRunAttemptCount() > 0 &&
+                                shouldReleaseLaunchWhileRetrying(
+                                    downloadFutures.containsKey(id),
+                                    setNext,
+                                    Boolean.TRUE.equals(CapgoUpdater.this.directUpdate),
+                                    CapgoUpdater.this.previewSession
+                                ) &&
+                                launchReleasedWhileRetrying.compareAndSet(false, true)
+                            ) {
+                                logger.warn("Direct update download is retrying, continuing launch on the current bundle");
+                                // Same fallback as the autoSplashscreen timeout: a later success installs on next background.
+                                CapgoUpdater.this.directUpdate = false;
+                                io.execute(() -> backgroundDownloadSettled(getCurrentBundle(), launchDownloadReadyStatus(false, false)));
+                            }
+                            break;
                         case RUNNING:
                             int percent = progress.getInt(DownloadService.PERCENT, 0);
                             notifyDownload(id, percent);
                             break;
                         case SUCCEEDED:
+                            if (!terminalHandled.compareAndSet(false, true)) break;
+                            observedDownloadVersions.remove(observedVersion);
                             logger.info("Download succeeded: " + workInfo.getState());
                             Data outputData = workInfo.getOutputData();
                             String dest = outputData.getString(DownloadService.FILEDEST);
@@ -733,6 +816,10 @@ public class CapgoUpdater {
                             boolean isManifest = outputData.getBoolean(DownloadService.IS_MANIFEST, false);
 
                             io.execute(() -> {
+                                // finishDownload clears directUpdate, so read the install plan first.
+                                final boolean directInstall =
+                                    setNext && Boolean.TRUE.equals(CapgoUpdater.this.directUpdate) && !CapgoUpdater.this.previewSession;
+                                final boolean previewSession = CapgoUpdater.this.previewSession;
                                 boolean success = finishDownload(id, dest, version, sessionKey, checksum, setNext, isManifest);
                                 BundleInfo resultBundle;
                                 if (!success) {
@@ -759,14 +846,21 @@ public class CapgoUpdater {
                                     resultBundle = getBundleInfo(id);
                                 }
 
-                                // Complete the future if it exists
+                                // Complete the future if it exists. download() waits on it.
+                                // downloadBackground does not, so the launch check must emit appReady here.
                                 CompletableFuture<BundleInfo> future = downloadFutures.remove(id);
                                 if (future != null) {
                                     future.complete(resultBundle);
                                 }
+                                final BundleInfo readyBundle = success && setNext ? resultBundle : null;
+                                if (!launchReleasedWhileRetrying.get()) {
+                                    notifyLaunchDownloadReady(future != null, success, directInstall, previewSession, setNext, readyBundle);
+                                }
                             });
                             break;
                         case FAILED:
+                            if (!terminalHandled.compareAndSet(false, true)) break;
+                            observedDownloadVersions.remove(observedVersion);
                             Data failedData = workInfo.getOutputData();
                             String error = failedData.getString(DownloadService.ERROR);
                             logger.error("Download failed");
@@ -801,9 +895,14 @@ public class CapgoUpdater {
                                 if (failedFuture != null) {
                                     failedFuture.complete(failedBundle);
                                 }
+                                if (!launchReleasedWhileRetrying.get()) {
+                                    notifyLaunchDownloadReady(failedFuture != null, false, false, false, false, null);
+                                }
                             });
                             break;
                         case CANCELLED:
+                            if (!terminalHandled.compareAndSet(false, true)) break;
+                            observedDownloadVersions.remove(observedVersion);
                             DataManager.getInstance().clearManifest(id);
                             CompletableFuture<BundleInfo> cancelledFuture = downloadFutures.remove(id);
                             if (cancelledFuture != null) {
@@ -829,7 +928,8 @@ public class CapgoUpdater {
             logger.error("Activity is null, cannot observe work progress");
             return;
         }
-        observeWorkProgress(this.activity, id, setNext);
+        observedDownloadVersions.add(version);
+        observeWorkProgress(this.activity, id, version, setNext);
 
         if (manifest != null) {
             DataManager.getInstance().setManifest(id, manifest);
@@ -1461,10 +1561,6 @@ public class CapgoUpdater {
             }
         } catch (final IOException e) {
             logger.error("Download blocked: " + e.getMessage());
-            final Map<String, Object> ret = new HashMap<>();
-            ret.put("version", version);
-            ret.put("error", e.getMessage());
-            notifyListeners("downloadFailed", ret);
             return;
         }
         if (!this.runDownloadGateQuiet()) {
@@ -1483,6 +1579,13 @@ public class CapgoUpdater {
                     return;
                 }
                 logger.info("Retrying failed download for version: " + version);
+            } else if (shouldRestartOrphanedDownload(observedDownloadVersions.contains(version))) {
+                // Left over from a killed process: nothing would finish it or release the launch, so start over.
+                if (!DownloadWorkerManager.cancelVersionDownloadAndAwait(this.activity, version)) {
+                    logger.error("Failed to cancel orphaned download before restarting it");
+                    return;
+                }
+                logger.info("Restarting download orphaned by a previous process for version: " + version);
             } else {
                 logger.info("Version already downloading: " + version);
                 return;
@@ -2511,8 +2614,18 @@ public class CapgoUpdater {
         final SharedPreferences.Editor editor,
         final String defaultChannelKey,
         final String configDefaultChannel,
+        final boolean allowSetDefaultChannel,
         final Callback callback
     ) {
+        if (!allowSetDefaultChannel) {
+            logger.error("unsetChannel is disabled by allowSetDefaultChannel config");
+            final Map<String, Object> retError = new HashMap<>();
+            retError.put("message", "unsetChannel is disabled by configuration");
+            retError.put("error", "disabled_by_config");
+            callback.callback(retError);
+            return;
+        }
+
         // Clear persisted defaultChannel and revert to config value
         editor.remove(defaultChannelKey);
         editor.apply();
@@ -3462,6 +3575,10 @@ public class CapgoUpdater {
             final BundleInfo newBundle = this.getBundleInfo(next);
             if (!newBundle.isBuiltin() && !this.bundleExists(next)) {
                 return false;
+            }
+            if (next.equals(this.getCurrentBundleId()) && BundleStatus.SUCCESS == newBundle.getStatus()) {
+                logger.info("Bundle " + next + " is already the current successful bundle. Skip next().");
+                return true;
             }
             this.editor.putString(NEXT_VERSION, next);
             this.setBundleStatus(next, BundleStatus.PENDING);

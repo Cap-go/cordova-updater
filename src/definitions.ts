@@ -10,7 +10,7 @@ export interface PluginListenerHandle {
 
 export interface CordovaUpdaterConfig {
     /**
-     * CapacitorUpdater can be configured with these options:
+     * Cordova updater can be configured with these options:
      */
     options?: {
       /**
@@ -24,7 +24,10 @@ export interface CordovaUpdaterConfig {
       appReadyTimeout?: number;
 
       /**
-       * Configure the number of seconds the native plugin should wait before considering API timeout.
+       * Configure the number of seconds the native plugin should wait before considering an HTTP timeout.
+       * Applies to update checks and file downloads. On Android these are idle connect/read/write
+       * timeouts and do not cap total download time; on iOS the request timeout also bounds the
+       * total download duration.
        *
        * Only available for Android and iOS.
        *
@@ -54,21 +57,27 @@ export interface CordovaUpdaterConfig {
       autoDeletePrevious?: boolean;
 
       /**
-       * Configure how the plugin should use Auto Update via an update server.
+       * Configure how the plugin checks for, downloads, and applies live updates.
+       *
+       * The plugin checks for updates when the app moves to the foreground. When
+       * {@link periodCheckDelay} is greater than 0, it also checks on a repeating timer
+       * while the app stays open.
        *
        * Boolean values keep their existing behavior:
        * - `true`: Same as `"atBackground"`.
        * - `false`: Same as `"off"`.
        *
        * String values merge the previous Auto Update and Direct Update configuration:
-       * - `"off"`: Disable Auto Update.
-       * - `"atBackground"`: Check and download updates automatically, then apply them the next time the app moves to background.
-       * - `"atInstall"`: Direct install only after app install or native app update, otherwise use `"atBackground"` behavior.
-       * - `"onLaunch"`: Direct install on app launch, otherwise use `"atBackground"` behavior after the first launch attempt.
-       * - `"always"`: Direct install whenever Auto Update runs.
-       * - `"onlyDownload"`: Check and download updates automatically, emit `updateAvailable`, but never direct install or set the next bundle automatically.
+       * - `"off"`: Disable automatic update checks.
+       * - `"atBackground"`: Check and download automatically on each foreground check, then apply the update the next time the app moves to background.
+       * - `"atInstall"`: Apply immediately only after a fresh install or native app store update; otherwise use `"atBackground"` behavior.
+       * - `"onLaunch"`: Apply immediately only when the app is brought to the foreground from a killed state (cold start). After that first check, fall back to `"atBackground"` behavior.
+       * - `"always"`: Check on every foreground transition and apply immediately whenever an update is available.
+       * - `"onlyDownload"`: Check and download automatically, emit `updateAvailable`, and never set the next bundle or apply an update automatically.
        *
-       * **Instant apply modes** (`"atInstall"`, `"onLaunch"`, `"always"`): upload bundles with the Capgo CLI `--delta` flag so only changed files download and the user experience stays fast. Also enable {@link autoSplashscreen} and install `@capacitor/splash-screen` with `launchAutoHide: false`.
+       * Instant apply modes (`"atInstall"`, `"onLaunch"`, `"always"`) apply while the user is waiting.
+       * Upload with `npx @capgo/cli@latest bundle upload --delta` so only changed files download. A full zip upload slows the user experience.
+       * These modes require `autoSplashscreen: true` and `a splash screen plugin` installed with `launchAutoHide: false`.
        *
        * Only available for Android and iOS.
        *
@@ -114,7 +123,8 @@ export interface CordovaUpdaterConfig {
        * Native stats include update lifecycle events, app health signals such as crashes,
        * Android ANRs, low-memory exits, iOS memory warnings, and WebView health signals
        * such as JavaScript errors, unhandled promise rejections, resource load failures,
-       * WebView renderer exits, and unclean WebView restarts when available.
+       * WebView renderer exits, unclean WebView restarts, app launch readiness timing,
+       * and WebView load milestones when available.
        *
        * @default https://plugin.capgo.app/stats
        * @example https://example.com/api/stats
@@ -144,17 +154,17 @@ export interface CordovaUpdaterConfig {
 
       /**
        * Configure when the plugin should direct install updates. Only for autoUpdate mode.
-       *
-       * @deprecated Use {@link PluginsConfig.CapacitorUpdater.autoUpdate} string modes instead.
-       * Works well for apps less than 10MB and with uploads done using --delta flag.
-       * Zip or apps more than 10MB will be relatively slow for users to update.
-       * - false: Never do direct updates (use default behavior: download at start, set when backgrounded)
-       * - atInstall: Direct update only when app is installed, updated from store, otherwise act as directUpdate = false
-       * - onLaunch: Direct update only on app installed, updated from store or after app kill, otherwise act as directUpdate = false
-       * - always: Direct update in all previous cases (app installed, updated from store, after app kill or app resume), never act as directUpdate = false
+       * Instant apply (`atInstall`, `onLaunch`, `always`) should be uploaded with `--delta` so the update does not slow the user experience. A full zip, especially over 10MB, is relatively slow for users.
+       * These modes require `autoSplashscreen: true` and `a splash screen plugin` installed with `launchAutoHide: false`.
+       * This flag makes the CLI upload delta in CI and ask for confirmation in local uploads.
+       * - false: Never do direct updates
+       * - atInstall: Same as `"atInstall"` for {@link autoUpdate}
+       * - onLaunch: Same as `"onLaunch"` for {@link autoUpdate}
+       * - always: Same as `"always"` for {@link autoUpdate}
        * - true: (deprecated) Same as "always" for backward compatibility
        *
-       * Activate this flag will automatically make the CLI upload delta in CICD envs and will ask for confirmation in local uploads.
+       * @deprecated Use {@link CordovaUpdaterConfig.options.autoUpdate} string modes instead.
+       *
        * Only available for Android and iOS.
        *
        * @default false
@@ -163,11 +173,10 @@ export interface CordovaUpdaterConfig {
       directUpdate?: boolean | 'atInstall' | 'always' | 'onLaunch';
 
       /**
-       * Automatically handle splashscreen hiding when using instant apply modes. When enabled, the plugin will automatically hide the splashscreen after updates are applied or when no update is needed.
+       * Automatically hide the splashscreen after instant apply updates finish, or when no update is needed.
+       * Required when using instant apply modes (`"atInstall"`, `"onLaunch"`, `"always"`), including the deprecated `directUpdate` values `"atInstall"`, `"onLaunch"`, `"always"`, and `true`.
+       * `a splash screen plugin` must be installed and configured with `launchAutoHide: false`.
        * This removes the need to manually listen for appReady events and call SplashScreen.hide().
-       * **Required** when `autoUpdate` is set to `"atInstall"`, `"onLaunch"`, or `"always"` (legacy `directUpdate` instant modes included). Without this option and the splash-screen plugin below, instant apply can leave users on a blank screen or dismiss the splash before the update finishes.
-       * Requires the @capacitor/splash-screen plugin to be installed and configured with launchAutoHide: false.
-       * Requires Auto Update and instant apply behavior to be enabled.
        *
        * Only available for Android and iOS.
        *
@@ -179,7 +188,7 @@ export interface CordovaUpdaterConfig {
       /**
        * Display a native loading indicator on top of the splashscreen while automatic direct updates are running.
        * Only takes effect when {@link autoSplashscreen} is enabled.
-       * Requires the @capacitor/splash-screen plugin to be installed and configured with launchAutoHide: false.
+       * Requires the a splash screen plugin plugin to be installed and configured with launchAutoHide: false.
        *
        * Only available for Android and iOS.
        *
@@ -203,7 +212,8 @@ export interface CordovaUpdaterConfig {
       autoSplashscreenTimeout?: number;
 
       /**
-       * Configure the delay period for period update check. the unit is in seconds.
+       * Configure the interval in seconds for repeating update checks while the app stays open.
+       * Foreground checks still run when this is 0. Values below 600 are normalized to 600.
        *
        * Only available for Android and iOS.
        * Cannot be less than 600 seconds (10 minutes).
@@ -286,6 +296,21 @@ export interface CordovaUpdaterConfig {
       allowModifyUrl?: boolean;
 
       /**
+       * Allow the plugin to follow redirects from HTTPS to plain HTTP for its own network requests
+       * (update checks, stats, channel calls, and bundle/manifest downloads).
+       *
+       * Blocked by default so a redirect can never downgrade updater traffic to an unencrypted connection.
+       * Only enable this if your self-hosted update server or CDN must redirect to an HTTP URL.
+       * Direct HTTP URLs (for example `localApi` during development) are not affected.
+       *
+       * Only available for Android and iOS.
+       *
+       * @default false
+       * @since  8.52.0
+       */
+      allowHttpsToHttpRedirect?: boolean;
+
+      /**
        * Allow the plugin to modify the appId dynamically from the JavaScript side.
        *
        *
@@ -296,7 +321,7 @@ export interface CordovaUpdaterConfig {
 
       /**
        * Allow marking bundles as errored from JavaScript while using manual update flows.
-       * When enabled, {@link UpdaterPlugin.setBundleError} can change a bundle status to `error`.
+       * When enabled, {@link CordovaUpdaterPlugin.setBundleError} can change a bundle status to `error`.
        *
        * @default false
        * @since 7.20.0
@@ -315,7 +340,7 @@ export interface CordovaUpdaterConfig {
       allowPreview?: boolean;
 
       /**
-       * Persist the customId set through {@link UpdaterPlugin.setCustomId} across app restarts.
+       * Persist the customId set through {@link CordovaUpdaterPlugin.setCustomId} across app restarts.
        *
        * Only available for Android and iOS.
        *
@@ -325,8 +350,8 @@ export interface CordovaUpdaterConfig {
       persistCustomId?: boolean;
 
       /**
-       * Persist the updateUrl, statsUrl and channelUrl set through {@link UpdaterPlugin.setUpdateUrl},
-       * {@link UpdaterPlugin.setStatsUrl} and {@link UpdaterPlugin.setChannelUrl} across app restarts.
+       * Persist the updateUrl, statsUrl and channelUrl set through {@link CordovaUpdaterPlugin.setUpdateUrl},
+       * {@link CordovaUpdaterPlugin.setStatsUrl} and {@link CordovaUpdaterPlugin.setChannelUrl} across app restarts.
        *
        * Only available for Android and iOS.
        *
@@ -336,7 +361,7 @@ export interface CordovaUpdaterConfig {
       persistModifyUrl?: boolean;
 
       /**
-       * Allow or disallow the {@link UpdaterPlugin.setChannel} method to modify the defaultChannel.
+       * Allow or disallow the {@link CordovaUpdaterPlugin.setChannel} method to modify the defaultChannel.
        * When set to `false`, calling `setChannel()` will return an error with code `disabled_by_config`.
        *
        * @default true
@@ -345,8 +370,8 @@ export interface CordovaUpdaterConfig {
       allowSetDefaultChannel?: boolean;
 
       /**
-       * Keep the default channel stored by {@link UpdaterPlugin.setChannel} or refreshed by
-       * {@link UpdaterPlugin.getChannel} when app data is restored into a new app install.
+       * Keep the default channel stored by {@link CordovaUpdaterPlugin.setChannel} or refreshed by
+       * {@link CordovaUpdaterPlugin.getChannel} when app data is restored into a new app install.
        *
        * `setChannel()` and a successful `getChannel()` still persist the selected channel across app
        * restarts. When this option is `false`, native startup clears that persisted channel when it
@@ -414,7 +439,7 @@ export interface CordovaUpdaterConfig {
       /**
        * Enable the native preview menu gesture while a preview session is active.
        * Outside preview sessions this preview menu is ignored, unless
-       * {@link PluginsConfig.CapacitorUpdater.allowShakeChannelSelector} is enabled.
+       * {@link CordovaUpdaterConfig.options.allowShakeChannelSelector} is enabled.
        *
        * @default false
        * @since  7.5.0
@@ -423,8 +448,8 @@ export interface CordovaUpdaterConfig {
 
       /**
        * Choose which native gesture opens the preview/channel menu.
-       * This applies to both {@link PluginsConfig.CapacitorUpdater.shakeMenu}
-       * and {@link PluginsConfig.CapacitorUpdater.allowShakeChannelSelector}.
+       * This applies to both {@link CordovaUpdaterConfig.options.shakeMenu}
+       * and {@link CordovaUpdaterConfig.options.allowShakeChannelSelector}.
        *
        * Only available for Android and iOS.
        *
@@ -435,9 +460,9 @@ export interface CordovaUpdaterConfig {
 
       /**
        * Enable the native menu gesture to show a channel selector menu for switching between update channels.
-       * If {@link PluginsConfig.CapacitorUpdater.shakeMenu} is also enabled while a preview session is active,
+       * If {@link CordovaUpdaterConfig.options.shakeMenu} is also enabled while a preview session is active,
        * the shake menu includes both preview actions and channel switching.
-       * The native gesture can be changed with {@link PluginsConfig.CapacitorUpdater.shakeMenuGesture}.
+       * The native gesture can be changed with {@link CordovaUpdaterConfig.options.shakeMenuGesture}.
        *
        * Only available for Android and iOS.
        *
@@ -448,7 +473,7 @@ export interface CordovaUpdaterConfig {
     };
 }
 
-export interface UpdaterPlugin {
+export interface CordovaUpdaterPlugin {
   /**
    * Notify the native layer that JavaScript initialized successfully.
    *
@@ -475,7 +500,7 @@ export interface UpdaterPlugin {
    * - Call immediately in your app entry point (main.js, app component mount, etc.)
    * - Don't put it after network calls or heavy initialization
    * - Don't wrap it in try/catch with conditions
-   * - Adjust {@link PluginsConfig.CapacitorUpdater.appReadyTimeout} if you need more time
+   * - Adjust {@link CordovaUpdaterConfig.options.appReadyTimeout} if you need more time
    *
    * @returns {Promise<AppReadyResult>} Always resolves successfully with current bundle info. This method never fails.
    */
@@ -484,10 +509,10 @@ export interface UpdaterPlugin {
   /**
    * Set the update URL for the app dynamically at runtime.
    *
-   * This overrides the {@link PluginsConfig.CapacitorUpdater.updateUrl} config value.
-   * Requires {@link PluginsConfig.CapacitorUpdater.allowModifyUrl} to be set to `true`.
+   * This overrides the {@link CordovaUpdaterConfig.options.updateUrl} config value.
+   * Requires {@link CordovaUpdaterConfig.options.allowModifyUrl} to be set to `true`.
    *
-   * Use {@link PluginsConfig.CapacitorUpdater.persistModifyUrl} to persist this value across app restarts.
+   * Use {@link CordovaUpdaterConfig.options.persistModifyUrl} to persist this value across app restarts.
    * Otherwise, the URL will reset to the config value on next app launch.
    *
    * @param options Contains the URL to use for checking for updates.
@@ -500,11 +525,11 @@ export interface UpdaterPlugin {
   /**
    * Set the statistics URL for the app dynamically at runtime.
    *
-   * This overrides the {@link PluginsConfig.CapacitorUpdater.statsUrl} config value.
-   * Requires {@link PluginsConfig.CapacitorUpdater.allowModifyUrl} to be set to `true`.
+   * This overrides the {@link CordovaUpdaterConfig.options.statsUrl} config value.
+   * Requires {@link CordovaUpdaterConfig.options.allowModifyUrl} to be set to `true`.
    *
    * Pass an empty string to disable statistics gathering entirely.
-   * Use {@link PluginsConfig.CapacitorUpdater.persistModifyUrl} to persist this value across app restarts.
+   * Use {@link CordovaUpdaterConfig.options.persistModifyUrl} to persist this value across app restarts.
    *
    * @param options Contains the URL to use for sending statistics, or an empty string to disable.
    * @returns {Promise<void>} Resolves when the URL is successfully updated.
@@ -516,10 +541,10 @@ export interface UpdaterPlugin {
   /**
    * Set the channel URL for the app dynamically at runtime.
    *
-   * This overrides the {@link PluginsConfig.CapacitorUpdater.channelUrl} config value.
-   * Requires {@link PluginsConfig.CapacitorUpdater.allowModifyUrl} to be set to `true`.
+   * This overrides the {@link CordovaUpdaterConfig.options.channelUrl} config value.
+   * Requires {@link CordovaUpdaterConfig.options.allowModifyUrl} to be set to `true`.
    *
-   * Use {@link PluginsConfig.CapacitorUpdater.persistModifyUrl} to persist this value across app restarts.
+   * Use {@link CordovaUpdaterConfig.options.persistModifyUrl} to persist this value across app restarts.
    * Otherwise, the URL will reset to the config value on next app launch.
    *
    * @param options Contains the URL to use for channel operations.
@@ -548,7 +573,9 @@ export interface UpdaterPlugin {
    * **Android Background Runner note:** `@capacitor/background-runner` loads its
    * configured runner script from native APK assets. Live updates cannot replace
    * that runner script. Keep it stable across OTA updates and ship a native app
-   * update when the runner code changes.
+   * update when the runner code changes. When a bundle switch happens, Capacitor
+   * Updater cancels and reschedules configured Background Runner WorkManager jobs
+   * and syncs the bundled runner script into native `public/` storage when present.
    *
    * @example
    * const bundle = await CapacitorUpdater.download({
@@ -598,7 +625,7 @@ export interface UpdaterPlugin {
    * - Event listeners registered after this call are unreliable and may never fire
    *
    * The reload happens automatically - you don't need to do anything else.
-   * If you need to preserve state like the current URL path, use the {@link PluginsConfig.CapacitorUpdater.keepUrlPathAfterReload} config option.
+   * If you need to preserve state like the current URL path, use the {@link CordovaUpdaterConfig.options.keepUrlPathAfterReload} config option.
    * For other state preservation needs, save your data before calling this method (e.g., to localStorage).
    *
    * **Do not** try to execute additional logic after calling `set()` - it won't work as expected.
@@ -615,7 +642,7 @@ export interface UpdaterPlugin {
    * This stores the currently active bundle as the pending fallback, enables the
    * native shake menu, and makes the next applied bundle show a native notice
    * explaining that shaking the device can reload or leave the preview.
-   * Requires {@link PluginsConfig.CapacitorUpdater.allowPreview} to be `true`.
+   * Requires {@link CordovaUpdaterConfig.options.allowPreview} to be `true`.
    * When `appId` is provided, the preview session temporarily uses that app id
    * for update checks until the user leaves the preview. Native updater stats are
    * skipped while the preview session is active.
@@ -739,7 +766,7 @@ export interface UpdaterPlugin {
    * will avoid using this bundle in the future.
    *
    * **Requirements:**
-   * - {@link PluginsConfig.CapacitorUpdater.allowManualBundleError} must be set to `true`
+   * - {@link CordovaUpdaterConfig.options.allowManualBundleError} must be set to `true`
    * - Only works in manual update mode (when autoUpdate is disabled)
    *
    * Common use case: After downloading and testing a bundle, you discover it has critical
@@ -1027,9 +1054,9 @@ export interface UpdaterPlugin {
    * (e.g., "production", "beta", "staging"). This method switches the device to a new channel.
    *
    * **Device Override UI:** `setChannel()` validates the channel with the backend, then stores the
-   * selected channel locally on the device. It does not create or update a backend Device Override,
-   * so the device will not appear as overridden in the Capgo dashboard. Only assignments created
-   * from the dashboard or the Public API are shown in the Device Override UI.
+   * selected channel locally on the device for future app restarts. It does not create or update
+   * a backend Device Override, so the device will not appear as overridden in the Capgo dashboard.
+   * Only assignments created from the dashboard or the Public API are shown in the Device Override UI.
    *
    * **Requirements:**
    * - The target channel must allow self-assignment (configured in your Capgo dashboard or backend)
@@ -1041,7 +1068,7 @@ export interface UpdaterPlugin {
    * - For user-driven channel changes
    *
    * **When NOT to use:**
-   * - At app boot/initialization - use {@link PluginsConfig.CapacitorUpdater.defaultChannel} config instead
+   * - At app boot/initialization - use {@link CordovaUpdaterConfig.options.defaultChannel} config instead
    * - Before user interaction
    *
    * **Important: Listen for the `channelPrivate` event**
@@ -1058,7 +1085,7 @@ export interface UpdaterPlugin {
    * ```
    *
    * This sends a request to the Capgo backend to validate the specified channel, then stores the
-   * channel locally on the device.
+   * channel locally on the device for future app restarts.
    *
    * @param options The {@link SetChannelOptions} containing the channel name and optional auto-update trigger.
    * @returns {Promise<ChannelRes>} Channel operation result with status and optional error/message.
@@ -1072,7 +1099,7 @@ export interface UpdaterPlugin {
    *
    * This clears only the channel stored locally by {@link setChannel}; it does not delete Dashboard or Public API Device Override records. After the local assignment is cleared, normal channel precedence applies:
    * - An existing Dashboard or Public API Device Override, if one exists
-   * - The {@link PluginsConfig.CapacitorUpdater.defaultChannel} if configured, or
+   * - The {@link CordovaUpdaterConfig.options.defaultChannel} if configured, or
    * - Your backend default channel for this app
    *
    * Use this when:
@@ -1101,8 +1128,8 @@ export interface UpdaterPlugin {
    * - Check if a device is on a specific channel before showing features
    * - Verify channel assignment after calling {@link setChannel}
    *
-   * On native platforms, a successful response also refreshes the locally persisted
-   * default channel used by update checks.
+   * On native platforms, a successful response also refreshes the default channel used by update checks.
+   * This refresh is persisted across app restarts.
    *
    * @returns {Promise<GetChannelRes>} The current channel information.
    * @throws {Error} If the operation fails.
@@ -1145,7 +1172,7 @@ export interface UpdaterPlugin {
    * - A/B testing or feature flagging
    *
    * **Persistence:**
-   * - When {@link PluginsConfig.CapacitorUpdater.persistCustomId} is `true`, the ID persists across app restarts
+   * - When {@link CordovaUpdaterConfig.options.persistCustomId} is `true`, the ID persists across app restarts
    * - When `false`, the ID is only kept for the current session
    *
    * **Clearing the custom ID:**
@@ -1166,7 +1193,7 @@ export interface UpdaterPlugin {
    * use {@link current} for that.
    *
    * Returns:
-   * - The {@link PluginsConfig.CapacitorUpdater.version} config value if set, or
+   * - The {@link CordovaUpdaterConfig.options.version} config value if set, or
    * - The native app version from platform configs (package.json, Info.plist, build.gradle)
    *
    * Use this to:
@@ -1231,7 +1258,7 @@ export interface UpdaterPlugin {
   /**
    * Check if automatic updates are currently enabled.
    *
-   * Returns `true` if {@link PluginsConfig.CapacitorUpdater.autoUpdate} is enabled,
+   * Returns `true` if {@link CordovaUpdaterConfig.options.autoUpdate} is enabled,
    * meaning the plugin will automatically check for, download, and apply updates.
    *
    * Returns `false` if in manual mode, where you control the update flow using
@@ -1511,15 +1538,15 @@ export interface UpdaterPlugin {
    * During preview sessions, users can use the configured native gesture to:
    * - Reload the current preview
    * - Leave the test app and return to the fallback bundle
-   * - Switch update channel, when {@link PluginsConfig.CapacitorUpdater.allowShakeChannelSelector} is also enabled
+   * - Switch update channel, when {@link CordovaUpdaterConfig.options.allowShakeChannelSelector} is also enabled
    *
    * Outside preview sessions, this preview menu is ignored. The channel selector can still be
-   * shown outside preview sessions when {@link PluginsConfig.CapacitorUpdater.allowShakeChannelSelector} is enabled.
+   * shown outside preview sessions when {@link CordovaUpdaterConfig.options.allowShakeChannelSelector} is enabled.
    *
    * **Important:** Disable this in production builds or only enable for internal testers.
    *
-   * This can also be configured via {@link PluginsConfig.CapacitorUpdater.shakeMenu}.
-   * The native gesture is configured via {@link PluginsConfig.CapacitorUpdater.shakeMenuGesture}.
+   * This can also be configured via {@link CordovaUpdaterConfig.options.shakeMenu}.
+   * The native gesture is configured via {@link CordovaUpdaterConfig.options.shakeMenuGesture}.
    *
    * @param options {@link SetShakeMenuOptions} with `enabled: true` to enable or `enabled: false` to disable.
    * @returns {Promise<void>} Resolves when the setting is applied.
@@ -1532,7 +1559,7 @@ export interface UpdaterPlugin {
    * Check if the native preview menu gesture is currently enabled.
    *
    * Returns the current state of the shake menu feature that can be toggled via
-   * {@link setShakeMenu} or configured via {@link PluginsConfig.CapacitorUpdater.shakeMenu}.
+   * {@link setShakeMenu} or configured via {@link CordovaUpdaterConfig.options.shakeMenu}.
    *
    * Use this to:
    * - Check if debug features are enabled
@@ -1552,8 +1579,8 @@ export interface UpdaterPlugin {
    * If {@link setShakeMenu} is also enabled while a preview session is active, the shake menu includes
    * both preview actions and channel switching.
    *
-   * This can also be configured via {@link PluginsConfig.CapacitorUpdater.allowShakeChannelSelector}.
-   * The native gesture is configured via {@link PluginsConfig.CapacitorUpdater.shakeMenuGesture}.
+   * This can also be configured via {@link CordovaUpdaterConfig.options.allowShakeChannelSelector}.
+   * The native gesture is configured via {@link CordovaUpdaterConfig.options.shakeMenuGesture}.
    *
    * @param options {@link SetShakeChannelSelectorOptions} with `enabled: true` to enable or `enabled: false` to disable.
    * @returns {Promise<void>} Resolves when the setting is applied.
@@ -1566,7 +1593,7 @@ export interface UpdaterPlugin {
    * Check if the shake channel selector is currently enabled.
    *
    * Returns the current state of the shake channel selector feature that can be toggled via
-   * {@link setShakeChannelSelector} or configured via {@link PluginsConfig.CapacitorUpdater.allowShakeChannelSelector}.
+   * {@link setShakeChannelSelector} or configured via {@link CordovaUpdaterConfig.options.allowShakeChannelSelector}.
    *
    * @returns {Promise<ShakeChannelSelectorEnabled>} Object with `enabled: true` or `enabled: false`.
    * @throws {Error} If the operation fails.
@@ -1579,7 +1606,7 @@ export interface UpdaterPlugin {
    *
    * Returns the App ID that identifies this app to the update server. This can be:
    * - The value set via {@link setAppId}, or
-   * - The {@link PluginsConfig.CapacitorUpdater.appId} config value, or
+   * - The {@link CordovaUpdaterConfig.options.appId} config value, or
    * - The default app identifier from your native app configuration
    *
    * Use this to:
@@ -1602,13 +1629,13 @@ export interface UpdaterPlugin {
    * app IDs, or multi-tenant configurations).
    *
    * **Requirements:**
-   * - {@link PluginsConfig.CapacitorUpdater.allowModifyAppId} must be set to `true`
+   * - {@link CordovaUpdaterConfig.options.allowModifyAppId} must be set to `true`
    *
    * **Important considerations:**
    * - Changing the App ID will affect which updates this device receives
    * - The new App ID must exist on your update server
    * - This is primarily for advanced use cases (multi-tenancy, environment switching)
-   * - Most apps should use the config-based {@link PluginsConfig.CapacitorUpdater.appId} instead
+   * - Most apps should use the config-based {@link CordovaUpdaterConfig.options.appId} instead
    *
    * @param options {@link SetAppIdOptions} containing the new App ID string.
    * @returns {Promise<void>} Resolves when the App ID is successfully changed.
@@ -1754,7 +1781,7 @@ export interface UpdaterPlugin {
  * success: The bundle has been downloaded and is ready to be **SET** as the next bundle.
  * error: The bundle has failed to download.
  */
-export type BundleStatus = 'success' | 'error' | 'pending' | 'downloading';
+export type BundleStatus = 'success' | 'error' | 'pending' | 'downloading' | 'deleted' | 'deleting';
 
 export type DelayUntilNext = 'background' | 'kill' | 'nativeVersion' | 'date';
 
@@ -1905,7 +1932,7 @@ export interface MajorAvailableEvent {
 }
 
 /**
- * Payload emitted by {@link UpdaterPlugin.addListener} with `breakingAvailable`.
+ * Payload emitted by {@link CordovaUpdaterPlugin.addListener} with `breakingAvailable`.
  *
  * @since 7.22.0
  */
@@ -2237,7 +2264,7 @@ export interface GetLatestOptions {
   /**
    * Temporarily use another app id for this update check while using a trusted preview container.
    * This only changes the app id sent by this request; it does not persist a preview session.
-   * Requires {@link PluginsConfig.CapacitorUpdater.allowPreview} to be `true`.
+   * Requires {@link CordovaUpdaterConfig.options.allowPreview} to be `true`.
    * @since 8.47.0
    * @default undefined
    */
@@ -2260,7 +2287,7 @@ export interface StartPreviewSessionOptions {
   /**
    * App id to use while the preview session is active.
    * The previous app id is restored when leaving the preview session.
-   * Requires {@link PluginsConfig.CapacitorUpdater.allowPreview} to be `true`.
+   * Requires {@link CordovaUpdaterConfig.options.allowPreview} to be `true`.
    * @since 8.47.0
    * @default undefined
    */
@@ -2269,7 +2296,7 @@ export interface StartPreviewSessionOptions {
    * HTTP(S) URL returning a preview download payload.
    * When provided, the native shake reload action fetches this payload again
    * before reloading so channel previews can move to the latest bundle.
-   * Requires {@link PluginsConfig.CapacitorUpdater.allowPreview} to be `true`.
+   * Requires {@link CordovaUpdaterConfig.options.allowPreview} to be `true`.
    * @since 8.48.0
    * @default undefined
    */
@@ -2607,7 +2634,7 @@ export interface SetAppIdOptions {
 // ============================================================================
 
 /**
- * Options for {@link UpdaterPlugin.getAppUpdateInfo}.
+ * Options for {@link CordovaUpdaterPlugin.getAppUpdateInfo}.
  *
  * @since 8.0.0
  */
@@ -2692,7 +2719,7 @@ export interface AppUpdateInfo {
   /**
    * Whether an immediate update is allowed (Android only).
    *
-   * If `true`, you can call {@link UpdaterPlugin.performImmediateUpdate}.
+   * If `true`, you can call {@link CordovaUpdaterPlugin.performImmediateUpdate}.
    *
    * @since 8.0.0
    */
@@ -2701,7 +2728,7 @@ export interface AppUpdateInfo {
   /**
    * Whether a flexible update is allowed (Android only).
    *
-   * If `true`, you can call {@link UpdaterPlugin.startFlexibleUpdate}.
+   * If `true`, you can call {@link CordovaUpdaterPlugin.startFlexibleUpdate}.
    *
    * @since 8.0.0
    */
@@ -2733,7 +2760,7 @@ export interface AppUpdateInfo {
 }
 
 /**
- * Options for {@link UpdaterPlugin.openAppStore}.
+ * Options for {@link CordovaUpdaterPlugin.openAppStore}.
  *
  * @since 8.0.0
  */
@@ -2881,7 +2908,7 @@ export enum FlexibleUpdateInstallStatus {
 
   /**
    * The update has been downloaded and is ready to install.
-   * Call {@link UpdaterPlugin.completeFlexibleUpdate} to install.
+   * Call {@link CordovaUpdaterPlugin.completeFlexibleUpdate} to install.
    */
   DOWNLOADED = 11,
 }
@@ -2920,7 +2947,7 @@ export enum AppUpdateResultCode {
 
   /**
    * Required information is missing.
-   * This can happen if {@link UpdaterPlugin.getAppUpdateInfo} wasn't called first.
+   * This can happen if {@link CordovaUpdaterPlugin.getAppUpdateInfo} wasn't called first.
    */
   INFO_MISSING = 5,
 }

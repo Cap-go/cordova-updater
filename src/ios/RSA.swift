@@ -14,7 +14,7 @@ import os.log
 public struct RSAPublicKey {
     private let key: SecKey
     private static let keyLock = NSLock()
-    private static let log = OSLog(subsystem: "app.capgo.cordova.updater", category: "RSA")
+    private static let log = OSLog(subsystem: "ee.forgr.capacitor_updater", category: "RSA")
     // One public key only: bounded storage, invalid/rotated keys never fall back
     // to a cached key with different material. SecKey is immutable after import.
     private static var cachedKey: (der: Data, key: SecKey)?
