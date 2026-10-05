@@ -25,6 +25,8 @@ import android.webkit.RenderProcessGoneDetail;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 import androidx.core.content.pm.PackageInfoCompat;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
 import com.google.android.gms.tasks.Task;
 // Play Store In-App Updates
 import com.google.android.play.core.appupdate.AppUpdateInfo;
@@ -247,6 +249,10 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     private volatile Thread backgroundDownloadTask;
     private volatile Thread appReadyCheck;
     private volatile long downloadStartTimeMs = 0;
+    private final long launchStartedAtMs = System.currentTimeMillis();
+    private final Object launchReportLock = new Object();
+    private boolean launchStartReported = false;
+    private boolean launchReadyReported = false;
     private static final long DOWNLOAD_TIMEOUT_MS = 600000; // 10 minute timeout
 
     private final Phaser semaphoreReady = new Phaser(0) {
@@ -743,7 +749,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         boolean disableJSLogging = this.updaterConfig.getBoolean("disableJSLogging", false);
         // Set the bridge in the Logger when webView is available
         if (cordova != null && getUpdaterWebView() != null && !disableJSLogging) {
-            
+
             logger.info("WebView set successfully for logging");
         } else {
             logger.info("WebView not ready yet, will be set later");
@@ -860,6 +866,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         }
         logger.info("init for device " + this.implementation.deviceID);
         logger.info("version native " + this.currentVersionNative.getOriginalString());
+        this.reportAppLaunchStart();
         this.autoDeleteFailed = this.updaterConfig.getBoolean("autoDeleteFailed", true);
         this.autoDeletePrevious = this.updaterConfig.getBoolean("autoDeletePrevious", true);
         this.updateUrl = this.updaterConfig.getString("updateUrl", updateUrlDefault);
@@ -1493,7 +1500,65 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         }
         final android.webkit.WebView webView = getUpdaterWebView();
         final String script = buildWebViewStatsReporterScript();
-        webView.post(() -> webView.evaluateJavascript(script, null));
+        webView.post(() -> {
+            try {
+                if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                    WebViewCompat.addDocumentStartJavaScript(webView, script, java.util.Collections.singleton("*"));
+                }
+            } catch (final Exception e) {
+                logger.debug("Unable to install document-start WebView stats reporter: " + e.getMessage());
+            }
+            webView.evaluateJavascript(script, null);
+        });
+    }
+
+    @Override
+    public Object onMessage(final String id, final Object data) {
+        if ("onPageStarted".equals(id) || "onPageFinished".equals(id)) {
+            final android.webkit.WebView webView = getUpdaterWebView();
+            if (webView != null) {
+                final String script = buildWebViewStatsReporterScript();
+                webView.post(() -> webView.evaluateJavascript(script, null));
+            }
+        }
+        return super.onMessage(id, data);
+    }
+
+    private void reportAppLaunchStart() {
+        if (
+            this.implementation == null ||
+            this.implementation.statsUrl == null ||
+            this.implementation.statsUrl.isEmpty() ||
+            this.launchStartReported
+        ) {
+            return;
+        }
+
+        this.launchStartReported = true;
+        final BundleInfo current = this.implementation.getCurrentBundle();
+        final Map<String, String> metadata = new HashMap<>();
+        metadata.put("launch_started_at", Long.toString(this.launchStartedAtMs));
+        metadata.put("source", "plugin_load");
+        this.implementation.sendStats("app_launch_start", current == null ? "" : current.getVersionName(), "", metadata);
+    }
+
+    private void reportAppLaunchReady(final BundleInfo bundle) {
+        synchronized (this.launchReportLock) {
+            if (
+                this.implementation == null ||
+                this.implementation.statsUrl == null ||
+                this.implementation.statsUrl.isEmpty() ||
+                this.launchReadyReported
+            ) {
+                return;
+            }
+            this.launchReadyReported = true;
+        }
+        final Map<String, String> metadata = new HashMap<>();
+        metadata.put("duration_ms", Long.toString(Math.max(0, System.currentTimeMillis() - this.launchStartedAtMs)));
+        metadata.put("launch_started_at", Long.toString(this.launchStartedAtMs));
+        metadata.put("source", "notify_app_ready");
+        this.implementation.sendStats("app_launch_ready", bundle == null ? "" : bundle.getVersionName(), "", metadata);
     }
 
     private Map<String, String> buildWebViewRenderProcessGoneMetadata(final RenderProcessGoneDetail detail) {
@@ -1601,6 +1666,8 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                 return "webview_render_process_gone";
             case "web_content_process_terminated":
                 return "webview_content_process_terminated";
+            case "webview_dom_content_loaded":
+                return "webview_dom_content_loaded";
             case "javascript_error":
             default:
                 return "webview_javascript_error";
@@ -1619,6 +1686,8 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         putStatsMetadataValue(metadata, "href", sanitizeStatsMetadataUrl(data.optString("href", "")), 512);
         putStatsMetadataValue(metadata, "user_agent", data.optString("user_agent", ""), 256);
         putStatsMetadataValue(metadata, "session_id", data.optString("session_id", ""), 128);
+        putStatsMetadataValue(metadata, "duration_ms", data.optString("duration_ms", ""), 32);
+        putStatsMetadataValue(metadata, "page_started_at", data.optString("page_started_at", ""), 64);
         putStatsMetadataValue(metadata, "previous_session_id", data.optString("previous_session_id", ""), 128);
         putStatsMetadataValue(metadata, "previous_href", sanitizeStatsMetadataUrl(data.optString("previous_href", "")), 512);
         putStatsMetadataValue(metadata, "previous_started_at", data.optString("previous_started_at", ""), 64);
@@ -1733,6 +1802,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     static String buildWebViewStatsReporterScript() {
         return (
             "(function(){" +
+            "if(window.top!==window){return;}" +
             "if(window.__capgoWebViewErrorReporterInstalled){return;}" +
             "window.__capgoWebViewErrorReporterInstalled=true;" +
             "var maxReports=20,sentReports=0,queue=[],seen={};" +
@@ -1751,13 +1821,16 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             "if(previous&&previous.active){send({type:'webview_unclean_restart',message:'WebView restarted without a clean page unload',previous_session_id:s(previous.id),previous_href:s(previous.href),previous_started_at:s(previous.started_at),previous_updated_at:s(previous.updated_at)});}" +
             "writeSession(true);" +
             "setInterval(function(){writeSession(true);},15000);" +
+            "function pageDuration(){var started=Number(window.__capgoWebViewSessionStartedAt||Date.now());return String(Math.max(0,Date.now()-started));}" +
             "function markClean(){writeSession(false);}" +
             "window.addEventListener('pagehide',markClean,true);" +
             "window.addEventListener('beforeunload',markClean,true);" +
             "window.addEventListener('error',function(event){var target=event&&event.target;if(target&&target!==window&&(target.src||target.href)){send({type:'resource_error',message:'Resource failed to load',source:s(target.src||target.href),tag_name:s(target.tagName)});return;}send({type:'javascript_error',message:s((event&&event.message)||(event&&event.error)),source:s(event&&event.filename),line:s(event&&event.lineno),column:s(event&&event.colno),stack:stack(event&&event.error)});},true);" +
             "window.addEventListener('unhandledrejection',function(event){var reason=event&&event.reason;send({type:'unhandled_rejection',message:s(reason),stack:stack(reason)});},true);" +
             "document.addEventListener('securitypolicyviolation',function(event){send({type:'security_policy_violation',message:s(event&&event.violatedDirective),source:s(event&&event.blockedURI)});},true);" +
-            "document.addEventListener('deviceready',scheduleFlush,false);" +
+            "function reportDomContentLoaded(){send({type:'webview_dom_content_loaded',message:'WebView DOM content loaded',duration_ms:pageDuration(),page_started_at:String(window.__capgoWebViewSessionStartedAt)});}" +
+            "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',reportDomContentLoaded,true);}else{reportDomContentLoaded();}" +
+            "document.addEventListener('deviceready',function(){setTimeout(scheduleFlush,0);},false);" +
             "setTimeout(scheduleFlush,0);" +
             "})();"
         );
@@ -4068,6 +4141,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         try {
             final BundleInfo bundle = this.implementation.getCurrentBundle();
             this.implementation.setSuccess(bundle, this.autoDeletePrevious);
+            this.reportAppLaunchReady(bundle);
             logger.info("Current bundle loaded successfully. ['notifyAppReady()' was called] " + bundle);
             logger.info("semaphoreReady countDown");
             this.semaphoreDown();
