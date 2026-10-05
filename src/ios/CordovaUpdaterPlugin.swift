@@ -89,6 +89,9 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
 
                 public var implementation = CapgoUpdater()
     private let pluginVersion: String = "8.1.4"
+    private let launchStartedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+    private var launchStartReported = false
+    private var launchReadyReported = false
     static let updateUrlDefault = "https://plugin.capgo.app/updates"
     static let statsUrlDefault = "https://plugin.capgo.app/stats"
     static let channelUrlDefault = "https://plugin.capgo.app/channel_self"
@@ -392,6 +395,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
            state?.exists != true || (!defaultChannelPersistenceDisabled && state?.isReadable != true) {
             _ = self.persistDefaultChannelStateFromDefaults()
         }
+        self.reportAppLaunchStart()
         self.implementation.autoReset()
         let appHealthTracker = AppHealthTracker(implementation: self.implementation)
         self.appHealthTracker = appHealthTracker
@@ -3116,10 +3120,48 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         ])
     }
 
+    private func reportAppLaunchStart() {
+        guard !self.implementation.statsUrl.isEmpty, !launchStartReported else {
+            return
+        }
+
+        launchStartReported = true
+        let current = self.implementation.getCurrentBundle()
+        self.implementation.sendStats(
+            action: "app_launch_start",
+            versionName: current.getVersionName(),
+            oldVersionName: "",
+            metadata: [
+                "launch_started_at": String(launchStartedAtMs),
+                "source": "plugin_load"
+            ]
+        )
+    }
+
+    private func reportAppLaunchReady(_ bundle: BundleInfo) {
+        guard !self.implementation.statsUrl.isEmpty, !launchReadyReported else {
+            return
+        }
+
+        launchReadyReported = true
+        let duration = max(0, Int64(Date().timeIntervalSince1970 * 1000) - launchStartedAtMs)
+        self.implementation.sendStats(
+            action: "app_launch_ready",
+            versionName: bundle.getVersionName(),
+            oldVersionName: "",
+            metadata: [
+                "duration_ms": String(duration),
+                "launch_started_at": String(launchStartedAtMs),
+                "source": "notify_app_ready"
+            ]
+        )
+    }
+
     func notifyAppReady(_ call: CAPPluginCall) {
         self.semaphoreDown()
         let bundle = self.implementation.getCurrentBundle()
         self.implementation.setSuccess(bundle: bundle, autoDeletePrevious: self.autoDeletePrevious)
+        self.reportAppLaunchReady(bundle)
         logger.info("Current bundle loaded successfully. [notifyAppReady was called] \(bundle.toString())")
         self.clearIncomingPreviewTransition()
         self.hidePreviewTransitionLoader(reason: "notify-app-ready")
