@@ -866,7 +866,6 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         }
         logger.info("init for device " + this.implementation.deviceID);
         logger.info("version native " + this.currentVersionNative.getOriginalString());
-        this.reportAppLaunchStart();
         this.autoDeleteFailed = this.updaterConfig.getBoolean("autoDeleteFailed", true);
         this.autoDeletePrevious = this.updaterConfig.getBoolean("autoDeletePrevious", true);
         this.updateUrl = this.updaterConfig.getString("updateUrl", updateUrlDefault);
@@ -919,6 +918,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             this.clearPreviewSessionForNativeBuildChange();
         }
         this.leavePreviewSessionForLaunchIntentIfNeeded();
+        this.reportAppLaunchStart();
         this.reportNativeVersionStatsIfChanged();
         this.reportPreviousAppExitReasons();
         this.reportPreviousWebViewRenderProcessGone();
