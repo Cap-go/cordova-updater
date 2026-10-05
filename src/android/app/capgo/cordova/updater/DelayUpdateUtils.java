@@ -1,7 +1,6 @@
 package app.capgo.cordova.updater;
 
 import android.content.SharedPreferences;
-import io.github.g00fy2.versioncompare.Version;
 import java.text.ParsePosition;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;

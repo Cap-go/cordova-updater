@@ -10,7 +10,6 @@ import Cordova
 #endif
 import UIKit
 import WebKit
-import Version
 
 /**
  * Please read the Capacitor iOS Plugin Development Guide
@@ -139,7 +138,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     // Note: DELAY_CONDITION_PREFERENCES is now defined in DelayUpdateUtils.DELAY_CONDITION_PREFERENCES
     private var updateUrl = ""
     private var backgroundTaskID: UIBackgroundTaskIdentifier = UIBackgroundTaskIdentifier.invalid
-    private var currentVersionNative: Version = "0.0.0"
+    private var currentVersionNative = CapgoSemanticVersion(major: 0, minor: 0, patch: 0)
     private var currentBuildVersion: String = "0"
     private var autoUpdate = false
     private var autoUpdateMode = CordovaUpdaterPlugin.autoUpdateModeOff
@@ -200,6 +199,8 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
     private var isLeavingPreviewForIncomingLink = false
     private var previewTransitionClearWorkItem: DispatchWorkItem?
     let semaphoreReady = DispatchSemaphore(value: 0)
+    private var readyGuardArmed = false
+    private var readyGeneration = 0
 
     private var delayUpdateUtils: DelayUpdateUtils!
 
@@ -243,7 +244,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             fatalError("Cannot get version name")
         }
         do {
-            currentVersionNative = try Version(versionName)
+            currentVersionNative = try CapgoSemanticVersion(versionName)
         } catch {
             logger.error("Cannot parse versionName \(versionName)")
         }
@@ -285,6 +286,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         periodCheckDelay = Self.normalizedPeriodCheckDelaySeconds(readConfigInt("periodCheckDelay", 0))
 
         implementation.setPublicKey(readConfigString("publicKey") ?? "")
+        implementation.allowHttpsToHttpRedirect = readConfigBool("allowHttpsToHttpRedirect", false)
         implementation.notifyDownloadRaw = notifyDownload
         implementation.notifyListeners = { [weak self] eventName, data in
             let emit = {
@@ -473,13 +475,21 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         )
     }
 
-    private func syncKeepUrlPathFlag(enabled: Bool) {
-        let script: String
+    private func keepUrlPathFlagScriptSource(enabled: Bool) -> String {
         if enabled {
-            script = "(function(){ try { localStorage.setItem('\(keepUrlPathFlagKey)', '1'); } catch (err) {} window.__capgoKeepUrlPathAfterReload = true; var evt; try { evt = new CustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', { detail: { enabled: true } }); } catch (e) { evt = document.createEvent('CustomEvent'); evt.initCustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', false, false, { enabled: true }); } window.dispatchEvent(evt); })();"
-        } else {
-            script = "(function(){ try { localStorage.removeItem('\(keepUrlPathFlagKey)'); } catch (err) {} delete window.__capgoKeepUrlPathAfterReload; var evt; try { evt = new CustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', { detail: { enabled: false } }); } catch (e) { evt = document.createEvent('CustomEvent'); evt.initCustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', false, false, { enabled: false }); } window.dispatchEvent(evt); })();"
+            return "(function(){ try { localStorage.setItem('\(keepUrlPathFlagKey)', '1'); } catch (err) {} window.__capgoKeepUrlPathAfterReload = true; var evt; try { evt = new CustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', { detail: { enabled: true } }); } catch (e) { evt = document.createEvent('CustomEvent'); evt.initCustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', false, false, { enabled: true }); } window.dispatchEvent(evt); })();"
         }
+        return "(function(){ try { localStorage.removeItem('\(keepUrlPathFlagKey)'); } catch (err) {} delete window.__capgoKeepUrlPathAfterReload; var evt; try { evt = new CustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', { detail: { enabled: false } }); } catch (e) { evt = document.createEvent('CustomEvent'); evt.initCustomEvent('CapacitorUpdaterKeepUrlPathAfterReload', false, false, { enabled: false }); } window.dispatchEvent(evt); })();"
+    }
+
+    private func addKeepUrlPathDocumentStartScript(to controller: WKUserContentController, enabled: Bool) {
+        let userScript = WKUserScript(source: keepUrlPathFlagScriptSource(enabled: enabled), injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        controller.addUserScript(userScript)
+        self.keepUrlPathFlagLastValue = enabled
+    }
+
+    private func syncKeepUrlPathFlag(enabled: Bool) {
+        let script = keepUrlPathFlagScriptSource(enabled: enabled)
         DispatchQueue.main.async { [weak self] in
             guard let self = self, let webView = self.updaterWebView else {
                 return
@@ -545,8 +555,10 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         var dest: URL
         if BundleInfo.ID_BUILTIN == id {
             dest = Bundle.main.resourceURL!.appendingPathComponent("public")
+        } else if let bundleDir = try? self.implementation.getBundleDirectory(id: id) {
+            dest = bundleDir
         } else {
-            dest = self.implementation.getBundleDirectory(id: id)
+            dest = Bundle.main.resourceURL!.appendingPathComponent("public")
         }
 
         if !FileManager.default.fileExists(atPath: dest.path) {
@@ -1594,7 +1606,19 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             throw makePreviewError("Invalid download URL")
         }
 
+        if !self.implementation.publicKey.isEmpty && !CryptoCipher.isValidSessionKey(sessionKey) {
+            self.logger.error("Public key present but no valid session key provided")
+            self.implementation.sendStats(action: "session_key_required", versionName: version)
+            throw makePreviewError("Session key required when public key is present")
+        }
+
         var checksum = rawChecksum
+        if manifestEntries == nil && checksum.isEmpty {
+            self.logger.error("No checksum provided")
+            self.implementation.sendStats(action: "checksum_required", versionName: version)
+            throw makePreviewError("Checksum required")
+        }
+
         let next: BundleInfo
         if let manifestEntries = manifestEntries {
             next = try self.implementation.downloadManifest(manifest: manifestEntries, version: version, sessionKey: sessionKey)
@@ -1602,29 +1626,20 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             next = try self.implementation.download(url: url, version: version, sessionKey: sessionKey)
         }
 
-        if self.implementation.publicKey != "" && checksum == "" {
-            self.logger.error("Public key present but no checksum provided")
-            self.implementation.sendStats(action: "checksum_required", versionName: next.getVersionName())
-            let id = next.getId()
-            let resDel = self.implementation.delete(id: id)
-            if !resDel {
-                self.logger.error("Delete failed, id \(id) doesn't exist")
+        if manifestEntries == nil {
+            checksum = try CryptoCipher.decryptChecksum(checksum: checksum, publicKey: self.implementation.publicKey)
+            CryptoCipher.logChecksumInfo(label: "Bundle checksum", hexChecksum: next.getChecksum())
+            CryptoCipher.logChecksumInfo(label: "Expected checksum", hexChecksum: checksum)
+            if next.getChecksum() != checksum {
+                self.logger.error("Error checksum \(next.getChecksum()) \(checksum)")
+                self.implementation.sendStats(action: "checksum_fail", versionName: next.getVersionName())
+                let id = next.getId()
+                let resDel = self.implementation.delete(id: id)
+                if !resDel {
+                    self.logger.error("Delete failed, id \(id) doesn't exist")
+                }
+                throw ObjectSavableError.checksum
             }
-            throw ObjectSavableError.checksum
-        }
-
-        checksum = try CryptoCipher.decryptChecksum(checksum: checksum, publicKey: self.implementation.publicKey)
-        CryptoCipher.logChecksumInfo(label: "Bundle checksum", hexChecksum: next.getChecksum())
-        CryptoCipher.logChecksumInfo(label: "Expected checksum", hexChecksum: checksum)
-        if (checksum != "" || self.implementation.publicKey != "") && next.getChecksum() != checksum {
-            self.logger.error("Error checksum \(next.getChecksum()) \(checksum)")
-            self.implementation.sendStats(action: "checksum_fail", versionName: next.getVersionName())
-            let id = next.getId()
-            let resDel = self.implementation.delete(id: id)
-            if !resDel {
-                self.logger.error("Delete failed, id \(id) doesn't exist")
-            }
-            throw ObjectSavableError.checksum
         }
 
         self.logger.info("Good checksum \(next.getChecksum()) \(checksum)")
@@ -1676,8 +1691,10 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         let id = self.implementation.getCurrentBundleId()
         if BundleInfo.ID_BUILTIN == id {
             return Bundle.main.resourceURL!.appendingPathComponent("public")
+        } else if let bundleDir = try? self.implementation.getBundleDirectory(id: id) {
+            return bundleDir
         } else {
-            return self.implementation.getBundleDirectory(id: id)
+            return Bundle.main.resourceURL!.appendingPathComponent("public")
         }
     }
 
@@ -1685,6 +1702,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         let id = self.implementation.getCurrentBundleId()
         let dest = self.currentReloadDestination()
         logger.info("Reloading \(id)")
+        self.armReadyGuard(webView: self.updaterWebView)
 
         if self.keepUrlPathAfterReload {
             self.syncKeepUrlPathFlag(enabled: true)
@@ -2889,11 +2907,19 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         self.saveCallForAsyncHandling(call)
         DispatchQueue.global(qos: .utility).async {
             let configDefaultChannel = self.readConfigString("defaultChannel", "")!
-            let res = self.implementation.unsetChannel(defaultChannelKey: self.defaultChannelDefaultsKey, configDefaultChannel: configDefaultChannel)
+            let res = self.implementation.unsetChannel(
+                defaultChannelKey: self.defaultChannelDefaultsKey,
+                configDefaultChannel: configDefaultChannel,
+                allowSetDefaultChannel: self.allowSetDefaultChannel
+            )
             if res.error != "" {
-                self.rejectCall(call, message: res.error, code: "UNSETCHANNEL_FAILED", data: [
-                    "message": res.error,
-                    "error": res.error.contains("Channel URL") ? "missing_config" : "request_failed"
+                let errorCode = res.error == "disabled_by_config"
+                    ? "disabled_by_config"
+                    : (res.error.contains("Channel URL") ? "missing_config" : "request_failed")
+                let message = res.message.isEmpty ? res.error : res.message
+                self.rejectCall(call, message: message, code: "UNSETCHANNEL_FAILED", data: [
+                    "message": message,
+                    "error": errorCode
                 ])
             } else {
                 guard self.persistDefaultChannelStateFromDefaults() else {
@@ -3116,7 +3142,90 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         ])
     }
 
+    static func shouldAcceptReadyCall(guardArmed: Bool, expectedGeneration: Int, reportedGeneration: Int?) -> Bool {
+        if !guardArmed {
+            return true
+        }
+        guard let reportedGeneration else {
+            return false
+        }
+        return reportedGeneration == expectedGeneration
+    }
+
+    static func readyGenerationScript(_ generation: Int) -> String {
+        return "(function(){window.__CAPGO_READY_GEN=\(generation);})();"
+    }
+
+    static func readyGenerationBootstrapScript(_ generation: Int) -> String {
+        return """
+        (function(){
+          var slot = { value: \(generation) };
+          window.__capgoReadyGenSlot = slot;
+          Object.defineProperty(window, '__CAPGO_READY_GEN', { get: function() { return slot.value; }, configurable: true });
+        })();
+        """
+    }
+
+    private func reinstallDocumentStartUserScripts(webView: WKWebView, readyGeneration: Int) {
+        let controller = webView.configuration.userContentController
+        controller.removeAllUserScripts()
+        self.keepUrlPathFlagLastValue = nil
+        let readyScript = WKUserScript(
+            source: CordovaUpdaterPlugin.readyGenerationBootstrapScript(readyGeneration),
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        controller.addUserScript(readyScript)
+        if self.keepUrlPathAfterReload {
+            self.addKeepUrlPathDocumentStartScript(to: controller, enabled: true)
+        }
+        self.webViewStatsReporter?.reinstallDocumentStartScript(on: webView)
+    }
+
+    private func armReadyGuard(webView: WKWebView?) {
+        self.readyGeneration += 1
+        let generation = self.readyGeneration
+        self.readyGuardArmed = true
+        guard let webView else {
+            logger.warn("Cannot stamp notifyAppReady generation without a webview")
+            self.readyGuardArmed = false
+            return
+        }
+        let installScripts = {
+            self.reinstallDocumentStartUserScripts(webView: webView, readyGeneration: generation)
+        }
+        if Thread.isMainThread {
+            installScripts()
+        } else {
+            DispatchQueue.main.sync(execute: installScripts)
+        }
+    }
+
+    private func reportedReadyGeneration(_ call: CAPPluginCall) -> Int? {
+        if let value = call.getValue("loadGeneration") as? Int {
+            return value
+        }
+        if let number = call.getValue("loadGeneration") as? NSNumber {
+            return number.intValue
+        }
+        return nil
+    }
+
+    private func acceptsReadyCall(_ call: CAPPluginCall) -> Bool {
+        let reported = self.readyGuardArmed ? self.reportedReadyGeneration(call) : nil
+        return CordovaUpdaterPlugin.shouldAcceptReadyCall(
+            guardArmed: self.readyGuardArmed,
+            expectedGeneration: self.readyGeneration,
+            reportedGeneration: reported
+        )
+    }
+
     func notifyAppReady(_ call: CAPPluginCall) {
+        if !self.acceptsReadyCall(call) {
+            logger.info("Ignoring notifyAppReady from a page that is no longer current")
+            call.resolve(["bundle": self.implementation.getCurrentBundle().toJSON()])
+            return
+        }
         self.semaphoreDown()
         let bundle = self.implementation.getCurrentBundle()
         self.implementation.setSuccess(bundle: bundle, autoDeletePrevious: self.autoDeletePrevious)
@@ -4123,6 +4232,28 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             if latestVersionName != "" && current.getVersionName() != latestVersionName {
                 do {
                     self.logger.info("New bundle: \(latestVersionName) found. Current is: \(current.getVersionName()). \(messageUpdate)")
+                    if !self.implementation.publicKey.isEmpty && !CryptoCipher.isValidSessionKey(sessionKey) {
+                        self.logger.error("Public key present but no valid session key provided")
+                        self.implementation.sendStats(action: "session_key_required", versionName: latestVersionName)
+                        self.endBackGroundTaskWithNotif(
+                            msg: "Session key required when public key is present",
+                            latestVersionName: latestVersionName,
+                            current: current,
+                            plannedDirectUpdate: plannedDirectUpdate
+                        )
+                        return
+                    }
+                    if res.manifest == nil && (res.checksum ?? "").isEmpty {
+                        self.logger.error("No checksum provided")
+                        self.implementation.sendStats(action: "checksum_required", versionName: latestVersionName)
+                        self.endBackGroundTaskWithNotif(
+                            msg: "Checksum required",
+                            latestVersionName: latestVersionName,
+                            current: current,
+                            plannedDirectUpdate: plannedDirectUpdate
+                        )
+                        return
+                    }
                     var nextImpl = self.implementation.getBundleInfoByVersionName(version: latestVersionName)
                     if nextImpl == nil || nextImpl?.isDeleted() == true {
                         if nextImpl?.isDeleted() == true {
@@ -4169,7 +4300,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
                     res.checksum = try CryptoCipher.decryptChecksum(checksum: res.checksum, publicKey: self.implementation.publicKey)
                     CryptoCipher.logChecksumInfo(label: "Bundle checksum", hexChecksum: next.getChecksum())
                     CryptoCipher.logChecksumInfo(label: "Expected checksum", hexChecksum: res.checksum)
-                    if res.checksum != "" && next.getChecksum() != res.checksum && res.manifest == nil {
+                    if res.manifest == nil && next.getChecksum() != res.checksum {
                         self.logger.error("Error checksum \(next.getChecksum()) \(res.checksum)")
                         self.implementation.sendStats(action: "checksum_fail", versionName: next.getVersionName())
                         let id = next.getId()
@@ -4584,8 +4715,8 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
                         // Determine update availability by comparing versions
                         if let availableVersion = availableVersion {
                             do {
-                                let currentVer = try Version(currentVersionName)
-                                let availableVer = try Version(availableVersion)
+                                let currentVer = try CapgoSemanticVersion(currentVersionName)
+                                let availableVer = try CapgoSemanticVersion(availableVersion)
                                 if availableVer > currentVer {
                                     result["updateAvailability"] = AppUpdateAvailability.updateAvailable.rawValue
                                 } else {

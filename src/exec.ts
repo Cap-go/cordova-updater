@@ -33,13 +33,26 @@ export function normalizeEmptyCordovaResult<T>(result: unknown): T | null {
 }
 
 export function exec<T = unknown>(action: string, args: unknown[] = []): Promise<T> {
+  const payloadArgs = [...args];
+  if (action === 'notifyAppReady') {
+    const win = window as Window & { __CAPGO_READY_GEN?: number };
+    if (typeof win.__CAPGO_READY_GEN === 'number') {
+      const payload =
+        payloadArgs[0] != null && typeof payloadArgs[0] === 'object' && !Array.isArray(payloadArgs[0])
+          ? { ...(payloadArgs[0] as Record<string, unknown>) }
+          : {};
+      payload.loadGeneration = win.__CAPGO_READY_GEN;
+      payloadArgs[0] = payload;
+    }
+  }
+
   return new Promise((resolve, reject) => {
     cordova.exec(
       (result: unknown) => resolve(result as T),
       (error: unknown) => reject(error),
       SERVICE_NAME,
       action,
-      args,
+      payloadArgs,
     );
   });
 }

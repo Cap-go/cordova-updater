@@ -23,8 +23,6 @@ import androidx.work.OneTimeWorkRequest;
 import androidx.work.PeriodicWorkRequest;
 import androidx.work.WorkInfo;
 import androidx.work.WorkManager;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
@@ -152,6 +150,9 @@ public class CapgoUpdater {
     }
 
     private final Map<String, CompletableFuture<BundleInfo>> downloadFutures = new ConcurrentHashMap<>();
+    // Versions whose WorkManager download is observed by this process. WorkManager persists work across a
+    // process kill, but the observer that finishes the download does not survive it.
+    private final Set<String> observedDownloadVersions = ConcurrentHashMap.newKeySet();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
 
     public CapgoUpdater(Logger logger) {
@@ -257,7 +258,52 @@ public class CapgoUpdater {
 
     void directUpdateFinish(final BundleInfo latest) {}
 
+    /** Launch downloads have no waiter. The plugin emits appReady from here when WorkManager settles. */
+    void backgroundDownloadSettled(final BundleInfo bundle, final String status, final long settlementToken) {}
+
+    private void settleBackgroundDownload(final BundleInfo bundle, final String status, final long settlementToken) {
+        this.backgroundDownloadSettled(bundle, status, settlementToken);
+    }
+
     void notifyListeners(final String id, final Map<String, Object> res) {}
+
+    static boolean shouldNotifyLaunchDownloadReady(
+        final boolean awaitedByCaller,
+        final boolean success,
+        final boolean directInstall,
+        final boolean previewSession
+    ) {
+        if (awaitedByCaller) {
+            return false;
+        }
+        if (!success) {
+            return true;
+        }
+        return !directInstall && !previewSession;
+    }
+
+    static boolean shouldRestartOrphanedDownload(final boolean observedByThisProcess) {
+        return !observedByThisProcess;
+    }
+
+    static boolean shouldReleaseLaunchWhileRetrying(
+        final boolean awaitedByCaller,
+        final boolean setNext,
+        final boolean directUpdate,
+        final boolean previewSession
+    ) {
+        return !awaitedByCaller && setNext && directUpdate && !previewSession;
+    }
+
+    static String launchDownloadReadyStatus(final boolean success, final boolean setNext) {
+        if (!success) {
+            return "Error downloading file";
+        }
+        if (setNext) {
+            return "update downloaded, will install next background";
+        }
+        return "update downloaded, autoUpdate onlyDownload";
+    }
 
     public String randomString() {
         final StringBuilder sb = new StringBuilder(10);
@@ -287,12 +333,40 @@ public class CapgoUpdater {
         this.cachedKeyId = CryptoCipher.calcKeyId(publicKey);
     }
 
+    private void requireSessionKeyForEncryptedUpdate(final String sessionKey) throws IOException {
+        if (!this.publicKey.isEmpty() && !CryptoCipher.isValidSessionKey(sessionKey)) {
+            logger.error("Public key present but no valid session key provided");
+            this.sendStats("session_key_required");
+            throw new IOException("Session key required when public key is present");
+        }
+    }
+
+    private void requireBundleChecksum(final String checksum) throws IOException {
+        if (checksum == null || checksum.isEmpty()) {
+            logger.error("No checksum provided");
+            this.sendStats("checksum_required");
+            throw new IOException("Checksum required");
+        }
+    }
+
+    static boolean containsPathTraversalSegment(final String relativePath) {
+        for (final String segment : relativePath.split("/")) {
+            if ("..".equals(segment)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     static File resolvePathInsideDirectory(final File baseDirectory, final String relativePath) throws IOException {
         if (relativePath == null || relativePath.isEmpty()) {
             throw new IOException("Invalid empty path");
         }
         if (relativePath.contains("\\") || relativePath.indexOf('\0') >= 0) {
             throw new IOException("Invalid path separator");
+        }
+        if (containsPathTraversalSegment(relativePath)) {
+            throw new IOException("Path traversal segments are not allowed");
         }
         if (new File(relativePath).isAbsolute()) {
             throw new IOException("Absolute paths are not allowed");
@@ -304,11 +378,16 @@ public class CapgoUpdater {
         final String targetPath = canonicalTarget.getPath();
         final String normalizedBasePath = basePath.endsWith(File.separator) ? basePath : basePath + File.separator;
 
-        if (!targetPath.equals(basePath) && !targetPath.startsWith(normalizedBasePath)) {
+        // Require a strict child of the base. Equality would accept "." and wipe/write the root.
+        if (!targetPath.startsWith(normalizedBasePath)) {
             throw new IOException("Path escapes base directory: " + relativePath);
         }
 
         return canonicalTarget;
+    }
+
+    static File resolveBundleDirectory(final File documentsDir, final String bundleId) throws IOException {
+        return resolvePathInsideDirectory(new File(documentsDir, bundleDirectory), bundleId);
     }
 
     public String getKeyId() {
@@ -378,11 +457,11 @@ public class CapgoUpdater {
         }
     }
 
-    private void flattenAssets(final File sourceFile, final String dest) throws IOException {
+    private void flattenAssets(final File sourceFile, final File destinationFile) throws IOException {
         if (!sourceFile.exists()) {
             throw new FileNotFoundException("Source file not found: " + sourceFile.getPath());
         }
-        final File destinationFile = new File(this.documentsDir, dest);
+        assertPathInsideBundleRoot(destinationFile);
         Objects.requireNonNull(destinationFile.getParentFile()).mkdirs();
         final String[] entries = sourceFile.list(this.filter);
         if (entries == null || entries.length == 0) {
@@ -411,7 +490,13 @@ public class CapgoUpdater {
             return;
         }
 
-        final File bundleDir = this.getBundleDirectory(id);
+        final File bundleDir;
+        try {
+            bundleDir = this.getBundleDirectory(id);
+        } catch (IOException e) {
+            logger.debug("Skip delta cache population: invalid bundle id");
+            return;
+        }
         if (!bundleDir.exists()) {
             logger.debug("Skip delta cache population: bundle dir missing");
             return;
@@ -499,7 +584,10 @@ public class CapgoUpdater {
         if (fileHash.isEmpty()) {
             return "";
         }
-        if (this.publicKey != null && !this.publicKey.isEmpty() && sessionKey != null && !sessionKey.isEmpty()) {
+        if (this.publicKey != null && !this.publicKey.isEmpty()) {
+            if (!CryptoCipher.isValidSessionKey(sessionKey)) {
+                return "";
+            }
             try {
                 fileHash = CryptoCipher.decryptChecksum(fileHash, this.publicKey);
             } catch (Exception e) {
@@ -663,12 +751,36 @@ public class CapgoUpdater {
         }
     }
 
-    private void observeWorkProgress(Context context, String id, boolean setNext) {
+    private void notifyLaunchDownloadReady(
+        final boolean awaitedByCaller,
+        final boolean success,
+        final boolean directInstall,
+        final boolean previewSession,
+        final boolean setNext,
+        final BundleInfo bundle,
+        final long settlementToken
+    ) {
+        if (!shouldNotifyLaunchDownloadReady(awaitedByCaller, success, directInstall, previewSession)) {
+            return;
+        }
+        final BundleInfo readyBundle = bundle != null ? bundle : this.getCurrentBundle();
+        this.backgroundDownloadSettled(readyBundle, launchDownloadReadyStatus(success, setNext), settlementToken);
+    }
+
+    private void observeWorkProgress(
+        Context context,
+        String id,
+        String observedVersion,
+        boolean setNext,
+        final long settlementToken
+    ) {
         if (!(context instanceof LifecycleOwner)) {
             logger.error("Context is not a LifecycleOwner, cannot observe work progress");
             return;
         }
 
+        final AtomicBoolean terminalHandled = new AtomicBoolean(false);
+        final AtomicBoolean launchReleasedWhileRetrying = new AtomicBoolean(false);
         activity.runOnUiThread(() -> {
             WorkManager.getInstance(context)
                 .getWorkInfosByTagLiveData(id)
@@ -679,11 +791,40 @@ public class CapgoUpdater {
                     Data progress = workInfo.getProgress();
 
                     switch (workInfo.getState()) {
+                        case ENQUEUED:
+                            // A run attempt already happened, so WorkManager scheduled a retry (network lost midway,
+                            // 5xx, ...). Retries back off without limit, so a direct install must not keep the launch
+                            // (and its splashscreen) blocked until the network comes back.
+                            if (
+                                workInfo.getRunAttemptCount() > 0 &&
+                                shouldReleaseLaunchWhileRetrying(
+                                    downloadFutures.containsKey(id),
+                                    setNext,
+                                    Boolean.TRUE.equals(CapgoUpdater.this.directUpdate),
+                                    CapgoUpdater.this.previewSession
+                                ) &&
+                                launchReleasedWhileRetrying.compareAndSet(false, true)
+                            ) {
+                                logger.warn("Direct update download is retrying, continuing launch on the current bundle");
+                                // Same fallback as the autoSplashscreen timeout: a later success installs on next background.
+                                CapgoUpdater.this.directUpdate = false;
+                                io.execute(
+                                    () ->
+                                        backgroundDownloadSettled(
+                                            getCurrentBundle(),
+                                            launchDownloadReadyStatus(false, false),
+                                            settlementToken
+                                        )
+                                );
+                            }
+                            break;
                         case RUNNING:
                             int percent = progress.getInt(DownloadService.PERCENT, 0);
                             notifyDownload(id, percent);
                             break;
                         case SUCCEEDED:
+                            if (!terminalHandled.compareAndSet(false, true)) break;
+                            observedDownloadVersions.remove(observedVersion);
                             logger.info("Download succeeded: " + workInfo.getState());
                             Data outputData = workInfo.getOutputData();
                             String dest = outputData.getString(DownloadService.FILEDEST);
@@ -693,6 +834,10 @@ public class CapgoUpdater {
                             boolean isManifest = outputData.getBoolean(DownloadService.IS_MANIFEST, false);
 
                             io.execute(() -> {
+                                // finishDownload clears directUpdate, so read the install plan first.
+                                final boolean directInstall =
+                                    setNext && Boolean.TRUE.equals(CapgoUpdater.this.directUpdate) && !CapgoUpdater.this.previewSession;
+                                final boolean previewSession = CapgoUpdater.this.previewSession;
                                 boolean success = finishDownload(id, dest, version, sessionKey, checksum, setNext, isManifest);
                                 BundleInfo resultBundle;
                                 if (!success) {
@@ -719,14 +864,29 @@ public class CapgoUpdater {
                                     resultBundle = getBundleInfo(id);
                                 }
 
-                                // Complete the future if it exists
+                                // Complete the future if it exists. download() waits on it.
+                                // downloadBackground does not, so the launch check must emit appReady here.
                                 CompletableFuture<BundleInfo> future = downloadFutures.remove(id);
                                 if (future != null) {
                                     future.complete(resultBundle);
                                 }
+                                final BundleInfo readyBundle = success && setNext ? resultBundle : null;
+                                if (!launchReleasedWhileRetrying.get()) {
+                                    notifyLaunchDownloadReady(
+                                        future != null,
+                                        success,
+                                        directInstall,
+                                        previewSession,
+                                        setNext,
+                                        readyBundle,
+                                        settlementToken
+                                    );
+                                }
                             });
                             break;
                         case FAILED:
+                            if (!terminalHandled.compareAndSet(false, true)) break;
+                            observedDownloadVersions.remove(observedVersion);
                             Data failedData = workInfo.getOutputData();
                             String error = failedData.getString(DownloadService.ERROR);
                             logger.error("Download failed");
@@ -761,9 +921,22 @@ public class CapgoUpdater {
                                 if (failedFuture != null) {
                                     failedFuture.complete(failedBundle);
                                 }
+                                if (!launchReleasedWhileRetrying.get()) {
+                                    notifyLaunchDownloadReady(
+                                        failedFuture != null,
+                                        false,
+                                        false,
+                                        false,
+                                        false,
+                                        null,
+                                        settlementToken
+                                    );
+                                }
                             });
                             break;
                         case CANCELLED:
+                            if (!terminalHandled.compareAndSet(false, true)) break;
+                            observedDownloadVersions.remove(observedVersion);
                             DataManager.getInstance().clearManifest(id);
                             CompletableFuture<BundleInfo> cancelledFuture = downloadFutures.remove(id);
                             if (cancelledFuture != null) {
@@ -783,13 +956,15 @@ public class CapgoUpdater {
         final String sessionKey,
         final String checksum,
         final JSONArray manifest,
-        final boolean setNext
+        final boolean setNext,
+        final long settlementToken
     ) {
         if (this.activity == null) {
             logger.error("Activity is null, cannot observe work progress");
             return;
         }
-        observeWorkProgress(this.activity, id, setNext);
+        observedDownloadVersions.add(version);
+        observeWorkProgress(this.activity, id, version, setNext, settlementToken);
 
         if (manifest != null) {
             DataManager.getInstance().setManifest(id, manifest);
@@ -835,31 +1010,24 @@ public class CapgoUpdater {
         String checksum = "";
 
         try {
+            this.requireSessionKeyForEncryptedUpdate(sessionKey);
             this.notifyDownload(id, 71);
             downloaded = new File(this.documentsDir, dest);
 
             if (!isManifest) {
-                String checksumDecrypted = Objects.requireNonNullElse(checksumRes, "");
+                String expectedChecksum = Objects.requireNonNullElse(checksumRes, "");
+                this.requireBundleChecksum(expectedChecksum);
 
-                // If public key is present but no checksum provided, refuse installation
-                if (!this.publicKey.isEmpty() && checksumDecrypted.isEmpty()) {
-                    logger.error("Public key present but no checksum provided");
-                    this.sendStats("checksum_required");
-                    throw new IOException("Checksum required when public key is present: " + id);
-                }
-
-                if (!sessionKey.isEmpty()) {
+                if (CryptoCipher.isValidSessionKey(sessionKey)) {
                     CryptoCipher.decryptFile(downloaded, publicKey, sessionKey);
-                    checksumDecrypted = CryptoCipher.decryptChecksum(checksumRes, publicKey);
-                    checksum = CryptoCipher.calcChecksum(downloaded);
-                } else {
-                    checksum = CryptoCipher.calcChecksum(downloaded);
+                    expectedChecksum = CryptoCipher.decryptChecksum(checksumRes, publicKey);
                 }
+                checksum = CryptoCipher.calcChecksum(downloaded);
                 CryptoCipher.logChecksumInfo("Calculated checksum", checksum);
-                CryptoCipher.logChecksumInfo("Expected checksum", checksumDecrypted);
-                if ((!checksumDecrypted.isEmpty() || !this.publicKey.isEmpty()) && !checksumDecrypted.equals(checksum)) {
+                CryptoCipher.logChecksumInfo("Expected checksum", expectedChecksum);
+                if (!expectedChecksum.equals(checksum)) {
                     logger.error("Checksum mismatch");
-                    logger.debug("Expected: " + checksumDecrypted + ", Got: " + checksum);
+                    logger.debug("Expected: " + expectedChecksum + ", Got: " + checksum);
                     this.sendStats("checksum_fail");
                     throw new IOException("Checksum failed: " + id);
                 }
@@ -887,13 +1055,11 @@ public class CapgoUpdater {
             if (!isManifest) {
                 extractedDir = this.unzip(id, downloaded, TEMP_UNZIP_PREFIX + this.randomString());
                 this.notifyDownload(id, 91);
-                final String idName = bundleDirectory + "/" + id;
-                this.flattenAssets(extractedDir, idName);
+                this.flattenAssets(extractedDir, this.getBundleDirectory(id));
                 this.cacheBundleFilesAsync(id);
             } else {
                 this.notifyDownload(id, 91);
-                final String idName = bundleDirectory + "/" + id;
-                this.flattenAssets(downloaded, idName);
+                this.flattenAssets(downloaded, this.getBundleDirectory(id));
                 downloaded.delete();
             }
             // Remove old bundle info and set new one
@@ -1112,18 +1278,44 @@ public class CapgoUpdater {
         }
     }
 
+    private void assertPathInsideDocumentsDir(final File target) throws IOException {
+        if (this.documentsDir == null) {
+            throw new IOException("Documents directory unavailable");
+        }
+        final File canonicalBase = this.documentsDir.getCanonicalFile();
+        final File canonicalTarget = target.getCanonicalFile();
+        final String basePath = canonicalBase.getPath();
+        final String normalizedBasePath = basePath.endsWith(File.separator) ? basePath : basePath + File.separator;
+        final String targetPath = canonicalTarget.getPath();
+        if (!targetPath.equals(basePath) && !targetPath.startsWith(normalizedBasePath)) {
+            throw new IOException("Path escapes updater storage: " + target.getPath());
+        }
+    }
+
+    private void assertPathInsideBundleRoot(final File target) throws IOException {
+        final File bundleRoot = new File(this.documentsDir, bundleDirectory).getCanonicalFile();
+        final File canonicalTarget = target.getCanonicalFile();
+        final String basePath = bundleRoot.getPath();
+        final String normalizedBasePath = basePath.endsWith(File.separator) ? basePath : basePath + File.separator;
+        final String targetPath = canonicalTarget.getPath();
+        if (!targetPath.equals(basePath) && !targetPath.startsWith(normalizedBasePath)) {
+            throw new IOException("Path escapes bundle storage: " + target.getPath());
+        }
+    }
+
     private void safeDelete(final File target) {
         if (target == null || !target.exists()) {
             return;
         }
         try {
+            this.assertPathInsideDocumentsDir(target);
             if (target.isDirectory()) {
                 this.deleteDirectory(target);
             } else if (!target.delete()) {
                 logger.warn("Failed to delete file: " + target.getAbsolutePath());
             }
         } catch (IOException cleanupError) {
-            logger.warn("Cleanup failed for " + target.getAbsolutePath() + ": " + cleanupError.getMessage());
+            logger.warn("Refusing unsafe delete for " + target.getAbsolutePath() + ": " + cleanupError.getMessage());
         }
     }
 
@@ -1384,19 +1576,20 @@ public class CapgoUpdater {
         final String version,
         final String sessionKey,
         final String checksum,
-        final JSONArray manifest
-    ) {
-        downloadBackground(url, version, sessionKey, checksum, manifest, true);
-    }
-
-    public void downloadBackground(
-        final String url,
-        final String version,
-        final String sessionKey,
-        final String checksum,
         final JSONArray manifest,
-        final boolean setNext
+        final boolean setNext,
+        final long settlementToken
     ) {
+        try {
+            this.requireSessionKeyForEncryptedUpdate(sessionKey);
+            if (manifest == null) {
+                this.requireBundleChecksum(checksum);
+            }
+        } catch (final IOException e) {
+            logger.error("Download blocked: " + e.getMessage());
+            this.settleBackgroundDownload(null, launchDownloadReadyStatus(false, setNext), settlementToken);
+            return;
+        }
         if (!this.runDownloadGateQuiet()) {
             return;
         }
@@ -1410,9 +1603,26 @@ public class CapgoUpdater {
                 // Cancel the failed download and allow retry
                 if (!DownloadWorkerManager.cancelVersionDownloadAndAwait(this.activity, version)) {
                     logger.error("Failed to cancel previous download before retry");
+                    this.settleBackgroundDownload(
+                        this.getCurrentBundle(),
+                        launchDownloadReadyStatus(false, setNext),
+                        settlementToken
+                    );
                     return;
                 }
                 logger.info("Retrying failed download for version: " + version);
+            } else if (shouldRestartOrphanedDownload(observedDownloadVersions.contains(version))) {
+                // Left over from a killed process: nothing would finish it or release the launch, so start over.
+                if (!DownloadWorkerManager.cancelVersionDownloadAndAwait(this.activity, version)) {
+                    logger.error("Failed to cancel orphaned download before restarting it");
+                    this.settleBackgroundDownload(
+                        this.getCurrentBundle(),
+                        launchDownloadReadyStatus(false, setNext),
+                        settlementToken
+                    );
+                    return;
+                }
+                logger.info("Restarting download orphaned by a previous process for version: " + version);
             } else {
                 logger.info("Version already downloading: " + version);
                 return;
@@ -1423,10 +1633,12 @@ public class CapgoUpdater {
         this.notifyDownload(id, 0);
         this.notifyDownload(id, 5);
 
-        this.download(id, url, this.randomString(), version, sessionKey, checksum, manifest, setNext);
+        this.download(id, url, this.randomString(), version, sessionKey, checksum, manifest, setNext, settlementToken);
     }
 
     public BundleInfo download(final String url, final String version, final String sessionKey, final String checksum) throws IOException {
+        this.requireSessionKeyForEncryptedUpdate(sessionKey);
+        this.requireBundleChecksum(checksum);
         this.runDownloadGate();
         // Check for existing bundle with same version and clean up if in error state
         BundleInfo existingBundle = this.getBundleInfoByName(version);
@@ -1448,7 +1660,7 @@ public class CapgoUpdater {
         downloadFutures.put(id, downloadFuture);
 
         // Start the download
-        this.download(id, url, dest, version, sessionKey, checksum, null, false);
+        this.download(id, url, dest, version, sessionKey, checksum, null, false, 0L);
 
         // Wait for completion without timeout
         try {
@@ -1478,6 +1690,7 @@ public class CapgoUpdater {
         final String checksum,
         final JSONArray manifest
     ) throws IOException {
+        this.requireSessionKeyForEncryptedUpdate(sessionKey);
         this.runDownloadGate();
         if (manifest == null) {
             return download(url, version, sessionKey, checksum);
@@ -1503,7 +1716,7 @@ public class CapgoUpdater {
         downloadFutures.put(id, downloadFuture);
 
         // Start the download
-        this.download(id, url, dest, version, sessionKey, checksum, manifest, false);
+        this.download(id, url, dest, version, sessionKey, checksum, manifest, false, 0L);
 
         // Wait for completion without timeout
         try {
@@ -1559,6 +1772,14 @@ public class CapgoUpdater {
 
     public Boolean delete(final String id, final Boolean removeInfo, final boolean cancelActiveDownload) throws IOException {
         synchronized (this.deleteLock) {
+            final File bundle;
+            try {
+                bundle = this.getBundleDirectory(id);
+            } catch (IOException e) {
+                logger.error("Cannot delete bundle with invalid id");
+                logger.debug("Bundle ID: " + id + ", Error: " + e.getMessage());
+                return false;
+            }
             final BundleInfo deleted = this.getBundleInfo(id);
             if (deleted.isBuiltin() || this.getCurrentBundleId().equals(id)) {
                 logger.error("Cannot delete current or builtin bundle");
@@ -1584,7 +1805,6 @@ public class CapgoUpdater {
                 return false;
             }
 
-            final File bundle = this.getBundleDirectory(id);
             final boolean hadRegistry = this.hasStoredBundleInfo(id);
             final boolean hadFolder = bundle.exists();
             if (!hadRegistry && !hadFolder) {
@@ -1732,12 +1952,17 @@ public class CapgoUpdater {
         this.editor.commit();
     }
 
-    private File getBundleDirectory(final String id) {
-        return new File(this.documentsDir, bundleDirectory + "/" + id);
+    private File getBundleDirectory(final String id) throws IOException {
+        return resolveBundleDirectory(this.documentsDir, id);
     }
 
     private boolean bundleExists(final String id) {
-        final File bundle = this.getBundleDirectory(id);
+        final File bundle;
+        try {
+            bundle = this.getBundleDirectory(id);
+        } catch (IOException e) {
+            return false;
+        }
         final BundleInfo bundleInfo = this.getBundleInfo(id);
         return (
             bundle.isDirectory() &&
@@ -1814,7 +2039,16 @@ public class CapgoUpdater {
             this.reset();
             return true;
         }
-        final File bundle = this.getBundleDirectory(id);
+        final File bundle;
+        try {
+            bundle = this.getBundleDirectory(id);
+        } catch (IOException e) {
+            logger.error("Invalid bundle id");
+            logger.debug("Bundle ID: " + id + ", Error: " + e.getMessage());
+            this.setBundleStatus(id, BundleStatus.ERROR);
+            this.sendStats("set_fail", newBundle.getVersionName());
+            return false;
+        }
         logger.info("Setting next active bundle: " + id);
         if (this.bundleExists(id)) {
             var currentBundleName = this.getCurrentBundle().getVersionName();
@@ -1832,8 +2066,12 @@ public class CapgoUpdater {
         if (bundle == null || bundle.isBuiltin() || !this.bundleExists(bundle.getId())) {
             return false;
         }
-        this.setCurrentBundle(this.getBundleDirectory(bundle.getId()));
-        return true;
+        try {
+            this.setCurrentBundle(this.getBundleDirectory(bundle.getId()));
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     boolean stagePreviewFallbackReload(final BundleInfo bundle) {
@@ -1847,8 +2085,12 @@ public class CapgoUpdater {
         if (!this.bundleExists(bundle.getId())) {
             return false;
         }
-        this.setCurrentBundle(this.getBundleDirectory(bundle.getId()));
-        return true;
+        try {
+            this.setCurrentBundle(this.getBundleDirectory(bundle.getId()));
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     void finalizePendingReload(final BundleInfo bundle, final String previousBundleName) {
@@ -2409,8 +2651,18 @@ public class CapgoUpdater {
         final SharedPreferences.Editor editor,
         final String defaultChannelKey,
         final String configDefaultChannel,
+        final boolean allowSetDefaultChannel,
         final Callback callback
     ) {
+        if (!allowSetDefaultChannel) {
+            logger.error("unsetChannel is disabled by allowSetDefaultChannel config");
+            final Map<String, Object> retError = new HashMap<>();
+            retError.put("message", "unsetChannel is disabled by configuration");
+            retError.put("error", "disabled_by_config");
+            callback.callback(retError);
+            return;
+        }
+
         // Clear persisted defaultChannel and revert to config value
         editor.remove(defaultChannelKey);
         editor.apply();
@@ -3360,6 +3612,12 @@ public class CapgoUpdater {
             final BundleInfo newBundle = this.getBundleInfo(next);
             if (!newBundle.isBuiltin() && !this.bundleExists(next)) {
                 return false;
+            }
+            if (next.equals(this.getCurrentBundleId()) && BundleStatus.SUCCESS == newBundle.getStatus()) {
+                logger.info("Bundle " + next + " is already the current successful bundle. Skip next().");
+                this.editor.remove(NEXT_VERSION);
+                this.editor.commit();
+                return true;
             }
             this.editor.putString(NEXT_VERSION, next);
             this.setBundleStatus(next, BundleStatus.PENDING);
