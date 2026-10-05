@@ -137,14 +137,19 @@ final class WebViewStatsReporter {
       }else{
         reportDomContentLoaded();
       }
-      window.addEventListener('load',function(){
+      function reportPageLoaded(){
         send({
           type:'webview_page_loaded',
           message:'WebView page loaded',
           duration_ms:pageDuration(),
           page_started_at:String(window.__capgoWebViewSessionStartedAt)
         });
-      },true);
+      }
+      if(document.readyState==='complete'){
+        reportPageLoaded();
+      }else{
+        window.addEventListener('load',reportPageLoaded,true);
+      }
       document.addEventListener('deviceready',function(){setTimeout(scheduleFlush,0);},false);
       setTimeout(scheduleFlush,0);
     })();
