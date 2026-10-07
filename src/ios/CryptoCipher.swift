@@ -160,50 +160,46 @@ public struct CryptoCipher {
     public static func calcChecksum(filePath: URL) -> String {
         let bufferSize = checksumBufferBytes()
         var sha256 = SHA256()
+        var readFailed = false
 
+        let fileHandle: FileHandle
         do {
-            let fileHandle: FileHandle
-            do {
-                fileHandle = try FileHandle(forReadingFrom: filePath)
-            } catch {
-                logger.error("Cannot open file for checksum calculation")
-                logger.debug("Path: \(filePath.path), Error: \(error)")
-                return ""
-            }
-
-            defer {
-                do {
-                    try fileHandle.close()
-                } catch {
-                    logger.error("Error closing file during checksum")
-                    logger.debug("Error: \(error)")
-                }
-            }
-
-            while autoreleasepool(invoking: {
-                let fileData: Data
-                do {
-                    fileData = try fileHandle.read(upToCount: bufferSize) ?? Data()
-                } catch {
-                    logger.error("Error reading file during checksum")
-                    logger.debug("Error: \(error)")
-                    return false
-                }
-
-                if fileData.count > 0 {
-                    sha256.update(data: fileData)
-                    return true // Continue
-                } else {
-                    return false // End of file
-                }
-            }) {}
-
-            return hexString(from: sha256)
+            fileHandle = try FileHandle(forReadingFrom: filePath)
         } catch {
-            logger.error("Cannot calculate checksum")
+            logger.error("Cannot open file for checksum calculation")
             logger.debug("Path: \(filePath.path), Error: \(error)")
             return ""
         }
+
+        defer {
+            do {
+                try fileHandle.close()
+            } catch {
+                logger.error("Error closing file during checksum")
+                logger.debug("Error: \(error)")
+            }
+        }
+
+        while autoreleasepool(invoking: {
+            let fileData: Data
+            do {
+                fileData = try fileHandle.read(upToCount: bufferSize) ?? Data()
+            } catch {
+                logger.error("Error reading file during checksum")
+                logger.debug("Error: \(error)")
+                readFailed = true
+                return false
+            }
+
+            if fileData.count > 0 {
+                sha256.update(data: fileData)
+                return true // Continue
+            } else {
+                return false // End of file
+            }
+        }) {}
+
+        return readFailed ? "" : hexString(from: sha256)
     }
 
     final class RunningChecksum {
@@ -222,8 +218,7 @@ public struct CryptoCipher {
     }
 
     static func hexString(from sha256: SHA256) -> String {
-        var copy = sha256
-        return copy.finalize().compactMap { String(format: "%02x", $0) }.joined()
+        return sha256.finalize().compactMap { String(format: "%02x", $0) }.joined()
     }
 
     static func shortPathKey(_ fileName: String) -> String {
@@ -232,8 +227,16 @@ public struct CryptoCipher {
         return String(hexString(from: sha256).prefix(16))
     }
 
+    public static func isValidSessionKey(_ sessionKey: String) -> Bool {
+        if sessionKey.isEmpty {
+            return false
+        }
+        let sessionKeyParts = sessionKey.components(separatedBy: ":")
+        return sessionKeyParts.count == 2 && !sessionKeyParts[0].isEmpty && !sessionKeyParts[1].isEmpty
+    }
+
     public static func decryptFile(filePath: URL, publicKey: String, sessionKey: String, version: String) throws {
-        if publicKey.isEmpty || sessionKey.isEmpty || sessionKey.components(separatedBy: ":").count != 2 {
+        if publicKey.isEmpty || !isValidSessionKey(sessionKey) {
             logger.info("Encryption not set, no public key or session, ignored")
             return
         }

@@ -31,7 +31,7 @@ def main() -> int:
     for name in ("LICENSE", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md"):
         shutil.copy2(SOURCE / name, TARGET / name)
 
-    for d in (".github", ".maestro", "native-contract-tests"):
+    for d in (".maestro", "native-contract-tests"):
         dst = TARGET / d
         if dst.exists():
             shutil.rmtree(dst)
@@ -40,6 +40,8 @@ def main() -> int:
     scripts_dst = TARGET / "scripts"
     for item in (SOURCE / "scripts").iterdir():
         if item.name in {"bootstrap.sh", "bootstrap-generate.py"}:
+            continue
+        if item.name == "check-capacitor-plugin-wiring.mjs":
             continue
         dst = scripts_dst / item.name
         if item.is_dir():

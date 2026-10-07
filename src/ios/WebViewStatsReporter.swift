@@ -176,6 +176,11 @@ final class WebViewStatsReporter {
         webView.evaluateJavaScript(Self.script, completionHandler: nil)
     }
 
+    func reinstallDocumentStartScript(on webView: WKWebView?) {
+        installed = false
+        install(on: webView)
+    }
+
     func reportError(_ call: CAPPluginCall) {
         let errorType = call.getString("type") ?? "javascript_error"
         let current = implementation.getCurrentBundle()

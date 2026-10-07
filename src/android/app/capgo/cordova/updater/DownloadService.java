@@ -14,7 +14,8 @@ import androidx.work.WorkerParameters;
 import java.io.*;
 import java.io.FileInputStream;
 import java.net.HttpURLConnection;
-import java.net.URL;
+import java.net.MalformedURLException;
+import java.net.ProtocolException;
 import java.nio.channels.FileChannel;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -30,9 +31,13 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
+import java.util.function.LongConsumer;
 import okhttp3.Call;
 import okhttp3.Callback;
+import okhttp3.CookieJar;
 import okhttp3.Dispatcher;
+import okhttp3.HttpUrl;
 import okhttp3.Interceptor;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -46,6 +51,49 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class DownloadService extends Worker {
+
+    /** A refused HTTPS to HTTP redirect. Permanent for the given URL, so downloads must not retry it. */
+    static final class BlockedRedirectException extends ProtocolException {
+
+        BlockedRedirectException() {
+            super("Blocked HTTPS to HTTP redirect; set allowHttpsToHttpRedirect to true to allow it");
+        }
+    }
+
+    static final class DownloadRetryException extends RuntimeException {
+
+        DownloadRetryException(String message) {
+            super(message);
+        }
+
+        DownloadRetryException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    static final class ZipWritePlan {
+
+        final int statusCode;
+        final long writeOffset;
+
+        ZipWritePlan(int statusCode, long writeOffset) {
+            this.statusCode = statusCode;
+            this.writeOffset = writeOffset;
+        }
+    }
+
+    static final class ContentRangeInfo {
+
+        final long start;
+        final long end;
+        final long total;
+
+        ContentRangeInfo(long start, long end, long total) {
+            this.start = start;
+            this.end = end;
+            this.total = total;
+        }
+    }
 
     private static Logger logger;
 
@@ -88,6 +136,8 @@ public class DownloadService extends Worker {
     // Match CapgoUpdater.timeout / responseTimeout default (20s). OkHttp's 10s
     // defaults were unused by the plugin config and aborted slow manifest GETs.
     private static volatile int httpTimeoutMs = 20_000;
+    // Off by default: a redirect must never downgrade updater traffic from HTTPS to plain HTTP.
+    private static volatile boolean allowHttpsToHttpRedirect = false;
     private static String currentAppId = "unknown";
     private static String currentPluginVersion = "unknown";
     private static String currentVersionOs = "unknown";
@@ -100,6 +150,9 @@ public class DownloadService extends Worker {
         sharedClient = new OkHttpClient.Builder()
             .dispatcher(dispatcher)
             .protocols(Arrays.asList(Protocol.HTTP_2, Protocol.HTTP_1_1))
+            // Never share cookies with Capgo endpoints: the app's java.net.CookieHandler default is
+            // Capacitor's WebView cookie manager, and it must not see (or be fed by) plugin traffic.
+            .cookieJar(CookieJar.NO_COOKIES)
             .connectTimeout(httpTimeoutMs, TimeUnit.MILLISECONDS)
             .readTimeout(httpTimeoutMs, TimeUnit.MILLISECONDS)
             .writeTimeout(httpTimeoutMs, TimeUnit.MILLISECONDS)
@@ -109,7 +162,31 @@ public class DownloadService extends Worker {
                 Request requestWithUserAgent = originalRequest.newBuilder().header("User-Agent", userAgent).build();
                 return chain.proceed(requestWithUserAgent);
             })
+            .addNetworkInterceptor((chain) -> {
+                Response response = chain.proceed(chain.request());
+                if (!allowHttpsToHttpRedirect && isHttpsToHttpRedirect(response)) {
+                    response.close();
+                    throw new BlockedRedirectException();
+                }
+                return response;
+            })
             .build();
+    }
+
+    static void setAllowHttpsToHttpRedirect(boolean allow) {
+        allowHttpsToHttpRedirect = allow;
+    }
+
+    static boolean isHttpsToHttpRedirect(Response response) {
+        if (!response.isRedirect() || !response.request().isHttps()) {
+            return false;
+        }
+        String location = response.header("Location");
+        if (location == null) {
+            return false;
+        }
+        HttpUrl target = response.request().url().resolve(location);
+        return target != null && !target.isHttps();
     }
 
     static int httpTimeoutMs() {
@@ -270,13 +347,26 @@ public class DownloadService extends Worker {
                     outStream.write(buffer, 0, length);
                 }
             }
-            if (!expectedHash.equalsIgnoreCase(CryptoCipher.digestToHex(digest))) {
+            if (!expectedHash.equalsIgnoreCase(sha256Hex(digest))) {
                 return false;
             }
             return replaceFile(tempFile, dest);
         } finally {
             deleteQuietly(tempFile);
         }
+    }
+
+    private static String sha256Hex(final MessageDigest digest) {
+        final byte[] hash = digest.digest();
+        final StringBuilder hexString = new StringBuilder(hash.length * 2);
+        for (final byte b : hash) {
+            final String hex = Integer.toHexString(0xff & b);
+            if (hex.length() == 1) {
+                hexString.append('0');
+            }
+            hexString.append(hex);
+        }
+        return hexString.toString();
     }
 
     private static void deleteQuietly(final File file) {
@@ -310,6 +400,38 @@ public class DownloadService extends Worker {
 
     static boolean rememberManifestTarget(final Set<String> seenTargets, final File targetFile) throws IOException {
         return seenTargets.add(targetFile.getCanonicalPath());
+    }
+
+    private static final class ManifestDownloadTask {
+
+        final String fileName;
+        final String finalFileHash;
+        final String downloadUrl;
+        final boolean isBrotli;
+        final File targetFile;
+        final File builtinFile;
+        final File cacheFile;
+        final File legacyCacheFile;
+
+        ManifestDownloadTask(
+            final String fileName,
+            final String finalFileHash,
+            final String downloadUrl,
+            final boolean isBrotli,
+            final File targetFile,
+            final File builtinFile,
+            final File cacheFile,
+            final File legacyCacheFile
+        ) {
+            this.fileName = fileName;
+            this.finalFileHash = finalFileHash;
+            this.downloadUrl = downloadUrl;
+            this.isBrotli = isBrotli;
+            this.targetFile = targetFile;
+            this.builtinFile = builtinFile;
+            this.cacheFile = cacheFile;
+            this.legacyCacheFile = legacyCacheFile;
+        }
     }
 
     static boolean tryCopyBuiltinAsset(final AssetManager assets, final String fileName, final File dest, final String expectedHash) {
@@ -373,9 +495,14 @@ public class DownloadService extends Worker {
                     return createFailureResult("Manifest is null");
                 }
             } else {
-                handleSingleFileDownload(url, id, documentsDir, dest, version, sessionKey, checksum);
+                handleSingleFileDownload(url, id, documentsDir, dest, version, sessionKey, checksum, publicKey);
                 return createSuccessResult(dest, version, sessionKey, checksum, false);
             }
+        } catch (DownloadRetryException e) {
+            if (logger != null) {
+                logger.debug("Download will retry: " + e.getMessage());
+            }
+            return Result.retry();
         } catch (Exception e) {
             return createFailureResult(e.getMessage());
         }
@@ -459,6 +586,12 @@ public class DownloadService extends Worker {
         try {
             logger.debug("handleManifestDownload");
 
+            if (publicKey != null && !publicKey.isEmpty() && !CryptoCipher.isValidSessionKey(sessionKey)) {
+                logger.error("Public key present but no valid session key provided");
+                sendStatsAsync("session_key_required", version);
+                throw new IOException("Session key required when public key is present");
+            }
+
             // Send stats for manifest download start
             sendStatsAsync("download_manifest_start", version);
 
@@ -479,9 +612,7 @@ public class DownloadService extends Worker {
             int totalFiles = manifest.length();
             final AtomicLong completedFiles = new AtomicLong(0);
             final AtomicBoolean hasError = new AtomicBoolean(false);
-
-            ExecutorService executor = Executors.newFixedThreadPool(Math.min(MANIFEST_MAX_CONCURRENT_FILES, Math.max(1, totalFiles)));
-            List<Future<?>> futures = new ArrayList<>();
+            final List<ManifestDownloadTask> tasks = new ArrayList<>();
             final Set<String> seenTargets = new HashSet<>();
 
             for (int i = 0; i < totalFiles; i++) {
@@ -496,7 +627,13 @@ public class DownloadService extends Worker {
                     continue;
                 }
 
-                if (publicKey != null && !publicKey.isEmpty() && sessionKey != null && !sessionKey.isEmpty()) {
+                if (publicKey != null && !publicKey.isEmpty()) {
+                    if (!CryptoCipher.isValidSessionKey(sessionKey)) {
+                        logger.error("Public key present but no valid session key provided");
+                        sendStatsAsync("session_key_required", version);
+                        hasError.set(true);
+                        continue;
+                    }
                     try {
                         fileHash = CryptoCipher.decryptChecksum(fileHash, publicKey);
                     } catch (Exception e) {
@@ -536,35 +673,56 @@ public class DownloadService extends Worker {
                 final File legacyCacheFile =
                     isBrotli && cacheFile != null ? new File(cacheFolder, finalFileHash + "_" + new File(fileName).getName()) : null;
 
-                // Ensure parent directories of the target file exist
-                if (!Objects.requireNonNull(targetFile.getParentFile()).exists() && !targetFile.getParentFile().mkdirs()) {
-                    logger.error("Failed to create parent directory for: " + targetFile.getAbsolutePath());
-                    hasError.set(true);
-                    continue;
-                }
+                tasks.add(
+                    new ManifestDownloadTask(
+                        fileName,
+                        finalFileHash,
+                        downloadUrl,
+                        isBrotli,
+                        targetFile,
+                        builtinFile,
+                        cacheFile,
+                        legacyCacheFile
+                    )
+                );
+            }
 
-                final boolean finalIsBrotli = isBrotli;
+            if (hasError.get()) {
+                throw new IOException("Manifest contains invalid or duplicate file paths");
+            }
+
+            for (final ManifestDownloadTask task : tasks) {
+                if (!Objects.requireNonNull(task.targetFile.getParentFile()).exists() && !task.targetFile.getParentFile().mkdirs()) {
+                    logger.error("Failed to create parent directory for: " + task.targetFile.getAbsolutePath());
+                    throw new IOException("Failed to create parent directory for: " + task.targetFile.getAbsolutePath());
+                }
+            }
+
+            ExecutorService executor = Executors.newFixedThreadPool(Math.min(MANIFEST_MAX_CONCURRENT_FILES, Math.max(1, totalFiles)));
+            List<Future<?>> futures = new ArrayList<>();
+
+            for (final ManifestDownloadTask task : tasks) {
                 Future<?> future = executor.submit(() -> {
                     try {
-                        if (tryCopyBuiltinAsset(assets, fileName, targetFile, finalFileHash)) {
-                            logger.debug("using builtin asset " + fileName);
-                        } else if (tryCopyBuiltinFile(builtinFile, targetFile, finalFileHash)) {
-                            logger.debug("using builtin file " + fileName);
+                        if (tryCopyBuiltinAsset(assets, task.fileName, task.targetFile, task.finalFileHash)) {
+                            logger.debug("using builtin asset " + task.fileName);
+                        } else if (tryCopyBuiltinFile(task.builtinFile, task.targetFile, task.finalFileHash)) {
+                            logger.debug("using builtin file " + task.fileName);
                         } else if (
-                            tryCopyFromCache(cacheFile, targetFile, finalFileHash) ||
-                            (legacyCacheFile != null && tryCopyFromCache(legacyCacheFile, targetFile, finalFileHash))
+                            tryCopyFromCache(task.cacheFile, task.targetFile, task.finalFileHash) ||
+                            (task.legacyCacheFile != null && tryCopyFromCache(task.legacyCacheFile, task.targetFile, task.finalFileHash))
                         ) {
-                            logger.debug("already cached " + fileName);
+                            logger.debug("already cached " + task.fileName);
                         } else {
                             downloadAndVerify(
-                                downloadUrl,
-                                targetFile,
-                                cacheFile,
-                                finalFileHash,
+                                task.downloadUrl,
+                                task.targetFile,
+                                task.cacheFile,
+                                task.finalFileHash,
                                 sessionKey,
                                 publicKey,
-                                finalIsBrotli,
-                                fileName
+                                task.isBrotli,
+                                task.fileName
                             );
                         }
 
@@ -572,8 +730,8 @@ public class DownloadService extends Worker {
                         int percent = calcTotalPercent(completed, totalFiles);
                         setProgress(percent);
                     } catch (Exception e) {
-                        logger.error("Error processing file: " + fileName + " " + e.getMessage());
-                        sendStatsAsync("download_manifest_file_fail", version + ":" + fileName);
+                        logger.error("Error processing file: " + task.fileName + " " + e.getMessage());
+                        sendStatsAsync("download_manifest_file_fail", version + ":" + task.fileName);
                         hasError.set(true);
                     }
                 });
@@ -620,8 +778,20 @@ public class DownloadService extends Worker {
         String dest,
         String version,
         String sessionKey,
-        String checksum
+        String checksum,
+        String publicKey
     ) {
+        if (publicKey != null && !publicKey.isEmpty() && !CryptoCipher.isValidSessionKey(sessionKey)) {
+            logger.error("Public key present but no valid session key provided");
+            sendStatsAsync("session_key_required", version);
+            throw new RuntimeException("Session key required when public key is present");
+        }
+        if (checksum == null || checksum.isEmpty()) {
+            logger.error("No checksum provided");
+            sendStatsAsync("checksum_required", version);
+            throw new RuntimeException("Checksum required");
+        }
+
         // Send stats for zip download start
         sendStatsAsync("download_zip_start", version);
 
@@ -637,21 +807,16 @@ public class DownloadService extends Worker {
             throw new RuntimeException("insufficient_disk_space");
         }
 
-        HttpURLConnection httpConn = null;
+        Response response = null;
         InputStream inputStream = null;
-        FileOutputStream outputStream = null;
         BufferedReader reader = null;
         BufferedWriter writer = null;
 
         try {
-            URL u = new URL(url);
-            httpConn = (HttpURLConnection) u.openConnection();
-
-            // Zip can stall longer than a JSON API call; keep a floor so
-            // responseTimeout cannot shrink large-bundle downloads.
-            int zipTimeoutMs = Math.max(httpTimeoutMs, 60_000);
-            httpConn.setConnectTimeout(zipTimeoutMs);
-            httpConn.setReadTimeout(zipTimeoutMs);
+            HttpUrl zipUrl = url != null ? HttpUrl.parse(url) : null;
+            if (zipUrl == null) {
+                throw new MalformedURLException("Expected an http or https URL");
+            }
 
             // Reading progress file (if exist)
             long downloadedBytes = 0;
@@ -676,14 +841,23 @@ public class DownloadService extends Worker {
                 clearDownloadData(documentsDir, id);
             }
 
-            if (downloadedBytes > 0) {
-                httpConn.setRequestProperty("Range", "bytes=" + downloadedBytes + "-");
+            if (isStopped()) {
+                throw new DownloadRetryException("download_stopped");
             }
 
-            int responseCode = httpConn.getResponseCode();
+            response = executeZipRequest(zipUrl, downloadedBytes);
+            int responseCode = response.code();
 
             if (responseCode == HttpURLConnection.HTTP_OK || responseCode == HttpURLConnection.HTTP_PARTIAL) {
-                long contentLength = httpConn.getContentLength() + downloadedBytes;
+                ResponseBody responseBody = response.body();
+                if (responseBody == null) {
+                    throw new IOException("Response body is null");
+                }
+                ZipWritePlan writePlan = planZipResumeWrite(responseCode, downloadedBytes, response.header("Content-Range"));
+                long responseBodyLength = responseBody.contentLength();
+                long contentLength = shouldAppendHttpBody(writePlan.statusCode, writePlan.writeOffset)
+                    ? (responseBodyLength >= 0 ? responseBodyLength + writePlan.writeOffset : -1)
+                    : responseBodyLength;
 
                 // Check if we have enough space for the actual file
                 if (contentLength > 0 && availableSpace < contentLength * 2) {
@@ -691,44 +865,36 @@ public class DownloadService extends Worker {
                 }
 
                 try {
-                    inputStream = httpConn.getInputStream();
-                    outputStream = new FileOutputStream(tempFile, downloadedBytes > 0);
+                    inputStream = responseBody.byteStream();
 
-                    if (downloadedBytes == 0) {
+                    if (writePlan.writeOffset == 0 && downloadedBytes == 0) {
                         writer = new BufferedWriter(new FileWriter(infoFile));
                         writer.write(String.valueOf(version));
                         writer.close();
                         writer = null;
                     }
 
-                    byte[] buffer = new byte[CryptoCipher.ioBufferBytes()];
-                    int lastNotifiedPercent = 0;
-                    int bytesRead;
-
-                    while ((bytesRead = inputStream.read(buffer)) != -1) {
-                        outputStream.write(buffer, 0, bytesRead);
-                        downloadedBytes += bytesRead;
-
-                        // Flush every 1MB to ensure progress is saved
-                        if (downloadedBytes % (1024 * 1024) == 0) {
-                            outputStream.flush();
+                    final int[] lastNotifiedPercent = { 0 };
+                    final long totalContentLength = contentLength;
+                    String contentRangeHeader = response.header("Content-Range");
+                    writeHttpBody(tempFile, inputStream, writePlan.statusCode, writePlan.writeOffset, this::isStopped, (written) -> {
+                        int percent = calcTotalPercent(written, totalContentLength);
+                        if (percent >= lastNotifiedPercent[0] + 10) {
+                            lastNotifiedPercent[0] = (percent / 10) * 10;
+                            setProgress(lastNotifiedPercent[0]);
                         }
-
-                        // Computing percentage
-                        int percent = calcTotalPercent(downloadedBytes, contentLength);
-                        if (percent >= lastNotifiedPercent + 10) {
-                            lastNotifiedPercent = (percent / 10) * 10;
-                            setProgress(lastNotifiedPercent);
-                        }
-                    }
-
-                    // Final flush
-                    outputStream.flush();
-                    outputStream.close();
-                    outputStream = null;
+                    });
 
                     inputStream.close();
                     inputStream = null;
+
+                    validateZipDownloadComplete(
+                        tempFile,
+                        writePlan.statusCode,
+                        contentRangeHeader,
+                        writePlan.writeOffset,
+                        responseBodyLength
+                    );
 
                     // Rename the temp file with the final name (dest)
                     if (!tempFile.renameTo(new File(documentsDir, dest))) {
@@ -743,13 +909,12 @@ public class DownloadService extends Worker {
                     // Try to free some memory
                     System.gc();
                     throw new RuntimeException("low_mem_fail");
-                } finally {
-                    // Ensure all resources are closed
-                    if (outputStream != null) {
-                        try {
-                            outputStream.close();
-                        } catch (Exception ignored) {}
+                } catch (IOException e) {
+                    if ("download_stopped".equals(e.getMessage())) {
+                        throw new DownloadRetryException("download_stopped", e);
                     }
+                    throw new DownloadRetryException(e.getMessage(), e);
+                } finally {
                     if (inputStream != null) {
                         try {
                             inputStream.close();
@@ -761,10 +926,14 @@ public class DownloadService extends Worker {
                         } catch (Exception ignored) {}
                     }
                 }
+            } else if (isRetryableHttpStatus(responseCode)) {
+                throw new DownloadRetryException("HTTP error: " + responseCode);
             } else {
                 infoFile.delete();
                 throw new RuntimeException("HTTP error: " + responseCode);
             }
+        } catch (DownloadRetryException e) {
+            throw e;
         } catch (OutOfMemoryError e) {
             logger.error("Critical memory error: " + e.getMessage());
             System.gc(); // Suggest garbage collection
@@ -772,17 +941,139 @@ public class DownloadService extends Worker {
         } catch (SecurityException e) {
             logger.error("Security error during download: " + e.getMessage());
             throw new RuntimeException("security_error: " + e.getMessage());
+        } catch (MalformedURLException e) {
+            logger.error("Invalid download URL: " + e.getMessage());
+            throw new RuntimeException("invalid_url: " + e.getMessage());
+        } catch (IOException e) {
+            logger.error("Download error: " + e.getMessage());
+            throw new DownloadRetryException(e.getMessage(), e);
         } catch (Exception e) {
             logger.error("Download error: " + e.getMessage());
             throw new RuntimeException(e.getMessage());
         } finally {
             // Ensure connection is closed
-            if (httpConn != null) {
+            if (response != null) {
                 try {
-                    httpConn.disconnect();
+                    response.close();
                 } catch (Exception ignored) {}
             }
         }
+    }
+
+    /**
+     * Zip bundle request on the shared client (no cookies, same User-Agent), resuming from
+     * {@code downloadedBytes} with a Range header. The caller closes the response.
+     */
+    static Response executeZipRequest(HttpUrl url, long downloadedBytes) throws IOException {
+        // Zip can stall longer than a JSON API call; keep a floor so
+        // responseTimeout cannot shrink large-bundle downloads.
+        int zipTimeoutMs = Math.max(httpTimeoutMs, 60_000);
+        OkHttpClient zipClient = sharedClient
+            .newBuilder()
+            .connectTimeout(zipTimeoutMs, TimeUnit.MILLISECONDS)
+            .readTimeout(zipTimeoutMs, TimeUnit.MILLISECONDS)
+            .writeTimeout(zipTimeoutMs, TimeUnit.MILLISECONDS)
+            .build();
+        Request.Builder builder = new Request.Builder().url(url);
+        if (downloadedBytes > 0) {
+            builder.header("Range", "bytes=" + downloadedBytes + "-");
+        }
+        return zipClient.newCall(builder.build()).execute();
+    }
+
+    static boolean isRetryableHttpStatus(int responseCode) {
+        return responseCode >= 500 || responseCode == 408 || responseCode == 429;
+    }
+
+    static long parseContentRangeStart(String contentRange) {
+        ContentRangeInfo range = parseContentRange(contentRange);
+        return range == null ? -1 : range.start;
+    }
+
+    static ContentRangeInfo parseContentRange(String contentRange) {
+        if (contentRange == null || contentRange.isEmpty()) {
+            return null;
+        }
+        String trimmed = contentRange.trim();
+        if (!trimmed.startsWith("bytes ")) {
+            return null;
+        }
+        int slash = trimmed.indexOf('/');
+        if (slash < 0) {
+            return null;
+        }
+        int dash = trimmed.indexOf('-', 6);
+        if (dash < 0 || dash >= slash) {
+            return null;
+        }
+        try {
+            long start = Long.parseLong(trimmed.substring(6, dash).trim());
+            long end = Long.parseLong(trimmed.substring(dash + 1, slash).trim());
+            String totalPart = trimmed.substring(slash + 1).trim();
+            long total = "*".equals(totalPart) ? -1 : Long.parseLong(totalPart);
+            if (end < start) {
+                return null;
+            }
+            return new ContentRangeInfo(start, end, total);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    static void validateZipDownloadComplete(
+        File tempFile,
+        int responseCode,
+        String contentRangeHeader,
+        long writeOffset,
+        long responseBodyLength
+    ) {
+        long fileLen = tempFile.length();
+        if (responseCode == HttpURLConnection.HTTP_PARTIAL) {
+            ContentRangeInfo range = parseContentRange(contentRangeHeader);
+            if (range == null) {
+                throw new DownloadRetryException("unknown_content_range_total");
+            }
+            if (range.total < 0) {
+                long advertisedSpan = range.end - range.start + 1;
+                long receivedSpan = fileLen - writeOffset;
+                if (receivedSpan != advertisedSpan) {
+                    throw new DownloadRetryException("incomplete_content_range");
+                }
+                return;
+            }
+            if (range.start != writeOffset) {
+                throw new DownloadRetryException("content_range_mismatch");
+            }
+            long advertisedSpan = range.end - range.start + 1;
+            long receivedSpan = fileLen - writeOffset;
+            if (receivedSpan != advertisedSpan) {
+                throw new DownloadRetryException("incomplete_content_range");
+            }
+            if (fileLen != range.total) {
+                throw new DownloadRetryException("incomplete_download");
+            }
+            return;
+        }
+        if (responseBodyLength >= 0 && fileLen != responseBodyLength) {
+            throw new DownloadRetryException("incomplete_download");
+        }
+    }
+
+    static ZipWritePlan planZipResumeWrite(int responseCode, long downloadedBytes, String contentRange) {
+        if (responseCode == HttpURLConnection.HTTP_PARTIAL) {
+            long rangeStart = parseContentRangeStart(contentRange);
+            if (rangeStart == downloadedBytes) {
+                return new ZipWritePlan(HttpURLConnection.HTTP_PARTIAL, downloadedBytes);
+            }
+            if (rangeStart == 0) {
+                return new ZipWritePlan(HttpURLConnection.HTTP_PARTIAL, 0);
+            }
+            throw new DownloadRetryException("invalid_content_range");
+        }
+        if (responseCode == HttpURLConnection.HTTP_OK && downloadedBytes > 0) {
+            return new ZipWritePlan(HttpURLConnection.HTTP_OK, 0);
+        }
+        return new ZipWritePlan(responseCode, downloadedBytes);
     }
 
     private void clearDownloadData(String docDir, String id) {
@@ -899,18 +1190,13 @@ public class DownloadService extends Worker {
                         throw new IOException("Response body is null");
                     }
                     try {
-                        long resumeFrom = existing;
                         if (code == HttpURLConnection.HTTP_PARTIAL && existing > 0) {
-                            String contentRange = response.header("Content-Range");
-                            if (contentRange == null || !contentRange.startsWith("bytes " + existing + "-")) {
-                                logger.debug("Unexpected Content-Range, restarting download of " + partial.getName());
-                                resumeFrom = 0;
-                                if (partial.exists() && !partial.delete()) {
-                                    logger.debug("Failed to delete partial before restart " + partial.getName());
-                                }
+                            ContentRangeInfo range = parseContentRange(response.header("Content-Range"));
+                            if (range == null || range.start != existing) {
+                                throw new IOException("Content-Range does not match resume offset");
                             }
                         }
-                        writeHttpBody(partial, responseBody.byteStream(), code, resumeFrom);
+                        writeHttpBody(partial, responseBody.byteStream(), code, existing);
                         keepPartial = true;
                     } catch (Exception e) {
                         keepPartial = true;
@@ -919,7 +1205,7 @@ public class DownloadService extends Worker {
                 }
             }
 
-            boolean needDecrypt = publicKey != null && !publicKey.isEmpty() && sessionKey != null && !sessionKey.isEmpty();
+            boolean needDecrypt = publicKey != null && !publicKey.isEmpty() && CryptoCipher.isValidSessionKey(sessionKey);
             File source = partial;
             if (needDecrypt) {
                 workFile = new File(cacheFolder, "work_" + UUID.randomUUID() + "_" + targetFile.getName() + ".tmp");
@@ -992,16 +1278,43 @@ public class DownloadService extends Worker {
     }
 
     static void writeHttpBody(File dest, InputStream body, int statusCode, long existingBytes) throws IOException {
+        writeHttpBody(dest, body, statusCode, existingBytes, null, null);
+    }
+
+    static void writeHttpBody(
+        File dest,
+        InputStream body,
+        int statusCode,
+        long existingBytes,
+        BooleanSupplier shouldStop,
+        LongConsumer onProgress
+    ) throws IOException {
+        if (shouldStop != null && shouldStop.getAsBoolean()) {
+            throw new IOException("download_stopped");
+        }
         boolean append = shouldAppendHttpBody(statusCode, existingBytes);
         byte[] buffer = new byte[CryptoCipher.ioBufferBytes()];
         try (FileOutputStream fos = new FileOutputStream(dest, append)) {
             int n;
             long written = append ? existingBytes : 0;
-            while ((n = body.read(buffer)) != -1) {
+            while (true) {
+                if (shouldStop != null && shouldStop.getAsBoolean()) {
+                    throw new IOException("download_stopped");
+                }
+                n = body.read(buffer);
+                if (shouldStop != null && shouldStop.getAsBoolean()) {
+                    throw new IOException("download_stopped");
+                }
+                if (n == -1) {
+                    break;
+                }
                 fos.write(buffer, 0, n);
                 written += n;
                 if (written % (1024 * 1024) == 0) {
                     fos.flush();
+                }
+                if (onProgress != null) {
+                    onProgress.accept(written);
                 }
             }
             fos.flush();

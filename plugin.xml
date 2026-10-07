@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
         id="@capgo/cordova-updater"
-        version="8.1.4">
+        version="8.2.0">
 
     <name>Updater</name>
     <description>Cordova plugin for Capgo live updates (OTA).</description>
@@ -52,6 +52,7 @@
     <preference name="PERSIST_CUSTOM_ID" default="false"/>
     <preference name="PERSIST_MODIFY_URL" default="false"/>
     <preference name="PERSIST_DEFAULT_CHANNEL_ON_REINSTALL" default="true"/>
+    <preference name="ALLOW_HTTPS_TO_HTTP_REDIRECT" default="false"/>
 
     <platform name="android">
         <config-file target="res/xml/config.xml" parent="/*">
@@ -100,6 +101,7 @@
             <string name="capgo_updater_persist_custom_id">$PERSIST_CUSTOM_ID</string>
             <string name="capgo_updater_persist_modify_url">$PERSIST_MODIFY_URL</string>
             <string name="capgo_updater_persist_default_channel_on_reinstall">$PERSIST_DEFAULT_CHANNEL_ON_REINSTALL</string>
+            <string name="capgo_updater_allow_https_to_http_redirect">$ALLOW_HTTPS_TO_HTTP_REDIRECT</string>
         </config-file>
 
         <framework src="src/android/capgo-cordova-updater.gradle" custom="true" type="gradleReference"/>
@@ -126,6 +128,7 @@
         <source-file src="src/android/app/capgo/cordova/updater/ShakeDetector.java" target-dir="src/app/capgo/cordova/updater"/>
         <source-file src="src/android/app/capgo/cordova/updater/ShakeMenu.java" target-dir="src/app/capgo/cordova/updater"/>
         <source-file src="src/android/app/capgo/cordova/updater/ThreeFingerPinchDetector.java" target-dir="src/app/capgo/cordova/updater"/>
+        <source-file src="src/android/app/capgo/cordova/updater/Version.java" target-dir="src/app/capgo/cordova/updater"/>
         <source-file src="src/android/app/capgo/cordova/updater/compat/JSArray.java" target-dir="src/app/capgo/cordova/updater/compat"/>
         <source-file src="src/android/app/capgo/cordova/updater/compat/JSObject.java" target-dir="src/app/capgo/cordova/updater/compat"/>
         <source-file src="src/android/app/capgo/cordova/updater/compat/PluginCall.java" target-dir="src/app/capgo/cordova/updater/compat"/>
@@ -171,6 +174,7 @@
         <config-file target="*-Info.plist" parent="CapgoUpdaterPersistCustomId"><string>$PERSIST_CUSTOM_ID</string></config-file>
         <config-file target="*-Info.plist" parent="CapgoUpdaterPersistModifyUrl"><string>$PERSIST_MODIFY_URL</string></config-file>
         <config-file target="*-Info.plist" parent="CapgoUpdaterPersistDefaultChannelOnReinstall"><string>$PERSIST_DEFAULT_CHANNEL_ON_REINSTALL</string></config-file>
+        <config-file target="*-Info.plist" parent="CapgoUpdaterAllowHttpsToHttpRedirect"><string>$ALLOW_HTTPS_TO_HTTP_REDIRECT</string></config-file>
 
 
         <source-file src="src/ios/AES.swift"/>
@@ -195,13 +199,9 @@
         <source-file src="src/ios/UpdaterSchemeHandler.swift"/>
         <source-file src="src/ios/UserDefaultsExtension.swift"/>
         <source-file src="src/ios/WebViewStatsReporter.swift"/>
-
-        <podspec>
-            <pods use-frameworks="true">
-                <pod name="Alamofire" spec="~> 5.11.0" />
-                <pod name="ZIPFoundation" spec="~> 0.9.20" />
-                <pod name="Version" spec="0.8.0" />
-            </pods>
-        </podspec>
+        <source-file src="src/ios/CapgoSemanticVersion.swift"/>
+        <source-file src="src/ios/RedirectPolicyDelegate.swift"/>
+        <source-file src="src/ios/ZipArchiveReader.swift"/>
+        <source-file src="src/ios/ZipCentralDirectory.swift"/>
     </platform>
 </plugin>

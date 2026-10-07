@@ -1,6 +1,6 @@
 {
   "name": "@capgo/cordova-updater",
-  "version": "8.1.4",
+  "version": "8.2.0",
   "license": "MPL-2.0",
   "description": "Live update Cordova plugin for Capgo",
   "main": "dist/plugin.cjs.js",
@@ -43,7 +43,7 @@
     "verify:web": "bun run build",
     "verify:android": "cd android && ./gradlew clean test && cd ..",
     "verify:ios": "SDK=$(xcrun --sdk iphonesimulator --show-sdk-path) && swift build --sdk \"$SDK\" --triple arm64-apple-ios16.0-simulator",
-    "native:contract": "bun run native:contract:android && bun run native:contract:ios",
+    "native:contract": "bun run native:contract:android && bun run native:contract:crypto:android && bun run native:contract:ios && bun run native:contract:crypto:ios",
     "test:maestro": "./scripts/maestro/run-android-live-update.sh",
     "test:maestro:android": "./scripts/test-maestro-android.sh",
     "test:maestro:ios": "./scripts/maestro/run-ios-live-update.sh",
@@ -59,6 +59,8 @@
     "example:install": "cd example-app && npm install",
     "example:build": "bun run build && cd example-app && bun install && bun run build && bun ../scripts/maestro/sync-cordova-config.mjs && npx cordova prepare",
     "native:contract:android": "cd android && ./gradlew testDebugUnitTest --tests app.capgo.cordova.updater.NativeContractTest && cd ..",
+    "native:contract:crypto:android": "cd android && ./gradlew testDebugUnitTest --tests app.capgo.cordova.updater.RsaContractTest && cd ..",
+    "native:contract:crypto:ios": "./scripts/test-ios.sh -only-testing:CordovaUpdaterPluginTests/RsaContractTests",
     "test": "bun run test:android && bun run test:ios",
     "test:android": "cd android && ./gradlew test && cd ..",
     "check:wiring": "node scripts/check-cordova-plugin-wiring.mjs",
@@ -80,7 +82,7 @@
     "prettier-pretty-check": "^0.2.0",
     "rimraf": "^6.0.1",
     "rollup": "^4.50.0",
-    "typescript": "^5.9.2"
+    "typescript": "^6.0.3"
   },
   "prettier": "@ionic/prettier-config",
   "eslintConfig": {
