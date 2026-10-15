@@ -19,7 +19,6 @@
 
 <div align="center">
   <h2><a href="https://capgo.app/?ref=plugin_cordova_updater"> ➡️ Get Instant updates for your App with Capgo</a></h2>
-  <h2><a href="https://capgo.app/consulting/?ref=plugin_cordova_updater"> Missing a feature? We’ll build the plugin for you 💪</a></h2>
 </div>
 
 Cordova plugin for [Capgo](https://capgo.app) live updates (OTA). Ship JavaScript, HTML, and CSS updates to Cordova Android and iOS apps without waiting on app store review.
