@@ -97,20 +97,10 @@ EOF
 
     (cd "$ios_root" && pod install --repo-update)
 
-    if [[ -f "$ios_root/App.xcworkspace/contents.xcworkspacedata" ]]; then
-      xcworkspace_rel="$ios_root/App.xcworkspace"
-      xcode_scheme="App"
-    else
-      xcworkspace_rel="$ios_root/Updater Example.xcworkspace"
-      xcode_scheme="Updater Example"
-    fi
-
-    xcodebuild \
-      -workspace "$xcworkspace_rel" \
-      -scheme "$xcode_scheme" \
-      -configuration Debug \
+    # Use Cordova's compile path so CocoaPods script phases resolve Podfile.lock paths
+    # the same way as normal ios builds (raw xcodebuild hits a bad relative path on ios 8).
+    bunx cordova compile ios --debug --no-interactive -- \
       -destination "generic/platform=iOS Simulator" \
-      -derivedDataPath "$tmp_root/plugin-example-derived-data" \
       CODE_SIGNING_ALLOWED=NO \
       SWIFT_VERSION=5.0 \
       "IPHONEOS_DEPLOYMENT_TARGET=${deployment_target}"
