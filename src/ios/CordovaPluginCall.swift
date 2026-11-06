@@ -155,13 +155,29 @@ class CordovaPluginCall {
         let result: CDVPluginResult
         switch message {
         case let dictionary as [AnyHashable: Any]:
+            #if SWIFT_PACKAGE
             result = CDVPluginResult(status: status, messageAs: dictionary)!
+            #else
+            result = CDVPluginResult(status: status, messageAs: dictionary)
+            #endif
         case let string as String:
+            #if SWIFT_PACKAGE
             result = CDVPluginResult(status: status, messageAs: string)!
+            #else
+            result = CDVPluginResult(status: status, messageAs: string)
+            #endif
         case .none:
+            #if SWIFT_PACKAGE
             result = CDVPluginResult(status: status)!
+            #else
+            result = CDVPluginResult(status: status)
+            #endif
         default:
+            #if SWIFT_PACKAGE
             result = CDVPluginResult(status: status, messageAs: String(describing: message))!
+            #else
+            result = CDVPluginResult(status: status, messageAs: String(describing: message))
+            #endif
         }
 
         let callbackId = self.callbackId
@@ -171,7 +187,11 @@ class CordovaPluginCall {
     }
 
     func sendKeepAliveResult(_ data: JSObject) {
+        #if SWIFT_PACKAGE
         let result = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: data as [AnyHashable: Any])!
+        #else
+        let result = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: data as [AnyHashable: Any])
+        #endif
         result.setKeepCallbackAs(true)
         let callbackId = self.callbackId
         sendOnMainThread {
@@ -180,7 +200,11 @@ class CordovaPluginCall {
     }
 
     func sendNoResultKeepAlive() {
+        #if SWIFT_PACKAGE
         let result = CDVPluginResult(status: CDVCommandStatus_NO_RESULT)!
+        #else
+        let result = CDVPluginResult(status: CDVCommandStatus_NO_RESULT)
+        #endif
         result.setKeepCallbackAs(true)
         let callbackId = self.callbackId
         sendOnMainThread {
