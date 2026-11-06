@@ -102,12 +102,11 @@ EOF
       exit 1
     fi
 
-    # CocoaPods check phase uses PODS_PODFILE_DIR_PATH; when unset it becomes /Podfile.lock and fails.
-    # Pass these explicitly so generic simulator builds match normal cordova-ios 8 layout.
-    bunx cordova compile ios --debug --no-interactive -- \
+    # CocoaPods Check Pods Manifest script uses PODS_PODFILE_DIR_PATH; when empty, diff sees /Podfile.lock.
+    # Prefix the compile so xcodebuild and its script phases see these (unlike passing only as build settings).
+    PODS_PODFILE_DIR_PATH="$ios_abs" PODS_ROOT="${ios_abs}/Pods" \
+      bunx cordova compile ios --debug --no-interactive -- \
       -destination "generic/platform=iOS Simulator" \
-      "PODS_PODFILE_DIR_PATH=${ios_abs}" \
-      "PODS_ROOT=${ios_abs}/Pods" \
       CODE_SIGNING_ALLOWED=NO \
       SWIFT_VERSION=5.0 \
       "IPHONEOS_DEPLOYMENT_TARGET=${deployment_target}"
