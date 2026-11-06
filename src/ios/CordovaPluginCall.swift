@@ -155,13 +155,13 @@ class CordovaPluginCall {
         let result: CDVPluginResult
         switch message {
         case let dictionary as [AnyHashable: Any]:
-            result = CDVPluginResult(status: status, messageAs: dictionary)!
+            result = CDVPluginResult(status: status, messageAs: dictionary)
         case let string as String:
-            result = CDVPluginResult(status: status, messageAs: string)!
+            result = CDVPluginResult(status: status, messageAs: string)
         case .none:
-            result = CDVPluginResult(status: status)!
+            result = CDVPluginResult(status: status)
         default:
-            result = CDVPluginResult(status: status, messageAs: String(describing: message))!
+            result = CDVPluginResult(status: status, messageAs: String(describing: message))
         }
 
         let callbackId = self.callbackId
@@ -171,7 +171,7 @@ class CordovaPluginCall {
     }
 
     func sendKeepAliveResult(_ data: JSObject) {
-        let result = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: data as [AnyHashable: Any])!
+        let result = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: data as [AnyHashable: Any])
         result.setKeepCallbackAs(true)
         let callbackId = self.callbackId
         sendOnMainThread {
@@ -180,7 +180,7 @@ class CordovaPluginCall {
     }
 
     func sendNoResultKeepAlive() {
-        let result = CDVPluginResult(status: CDVCommandStatus_NO_RESULT)!
+        let result = CDVPluginResult(status: CDVCommandStatus_NO_RESULT)
         result.setKeepCallbackAs(true)
         let callbackId = self.callbackId
         sendOnMainThread {
