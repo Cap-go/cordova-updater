@@ -95,12 +95,19 @@ end
 EOF
     fi
 
-    (cd "$ios_root" && pod install --repo-update)
+    ios_abs="$(cd "$ios_root" && pwd)"
+    (cd "$ios_abs" && pod install --repo-update)
+    if [[ ! -f "$ios_abs/Podfile.lock" ]]; then
+      echo "Expected Podfile.lock after pod install at $ios_abs"
+      exit 1
+    fi
 
-    # Use Cordova's compile path so CocoaPods script phases resolve Podfile.lock paths
-    # the same way as normal ios builds (raw xcodebuild hits a bad relative path on ios 8).
+    # CocoaPods check phase uses PODS_PODFILE_DIR_PATH; when unset it becomes /Podfile.lock and fails.
+    # Pass these explicitly so generic simulator builds match normal cordova-ios 8 layout.
     bunx cordova compile ios --debug --no-interactive -- \
       -destination "generic/platform=iOS Simulator" \
+      "PODS_PODFILE_DIR_PATH=${ios_abs}" \
+      "PODS_ROOT=${ios_abs}/Pods" \
       CODE_SIGNING_ALLOWED=NO \
       SWIFT_VERSION=5.0 \
       "IPHONEOS_DEPLOYMENT_TARGET=${deployment_target}"
