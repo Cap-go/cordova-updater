@@ -188,11 +188,13 @@ class CordovaPluginCall {
 
     func sendKeepAliveResult(_ data: JSObject) {
         #if SWIFT_PACKAGE
-        let result = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: data as [AnyHashable: Any])!
+        let result: CDVPluginResult? = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: data as [AnyHashable: Any])!
         #else
-        let result = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: data as [AnyHashable: Any])
+        // Typed optional so this compiles on cordova-ios 7 (implicitly unwrapped)
+        // and cordova-ios 8 (nullable) without a force unwrap in the #else branch.
+        let result: CDVPluginResult? = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: data as [AnyHashable: Any])
         #endif
-        result.setKeepCallbackAs(true)
+        result?.setKeepCallbackAs(true)
         let callbackId = self.callbackId
         sendOnMainThread {
             self.plugin.commandDelegate.send(result, callbackId: callbackId)
@@ -201,11 +203,11 @@ class CordovaPluginCall {
 
     func sendNoResultKeepAlive() {
         #if SWIFT_PACKAGE
-        let result = CDVPluginResult(status: CDVCommandStatus_NO_RESULT)!
+        let result: CDVPluginResult? = CDVPluginResult(status: CDVCommandStatus_NO_RESULT)!
         #else
-        let result = CDVPluginResult(status: CDVCommandStatus_NO_RESULT)
+        let result: CDVPluginResult? = CDVPluginResult(status: CDVCommandStatus_NO_RESULT)
         #endif
-        result.setKeepCallbackAs(true)
+        result?.setKeepCallbackAs(true)
         let callbackId = self.callbackId
         sendOnMainThread {
             self.plugin.commandDelegate.send(result, callbackId: callbackId)
