@@ -155,13 +155,29 @@ class CordovaPluginCall {
         let result: CDVPluginResult
         switch message {
         case let dictionary as [AnyHashable: Any]:
+            #if SWIFT_PACKAGE
             result = CDVPluginResult(status: status, messageAs: dictionary)!
+            #else
+            result = CDVPluginResult(status: status, messageAs: dictionary)
+            #endif
         case let string as String:
+            #if SWIFT_PACKAGE
             result = CDVPluginResult(status: status, messageAs: string)!
+            #else
+            result = CDVPluginResult(status: status, messageAs: string)
+            #endif
         case .none:
+            #if SWIFT_PACKAGE
             result = CDVPluginResult(status: status)!
+            #else
+            result = CDVPluginResult(status: status)
+            #endif
         default:
+            #if SWIFT_PACKAGE
             result = CDVPluginResult(status: status, messageAs: String(describing: message))!
+            #else
+            result = CDVPluginResult(status: status, messageAs: String(describing: message))
+            #endif
         }
 
         let callbackId = self.callbackId
@@ -171,20 +187,34 @@ class CordovaPluginCall {
     }
 
     func sendKeepAliveResult(_ data: JSObject) {
-        let result = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: data as [AnyHashable: Any])!
-        result.setKeepCallbackAs(true)
+        #if SWIFT_PACKAGE
+        let result: CDVPluginResult? = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: data as [AnyHashable: Any])!
+        #else
+        // Typed optional so this compiles on cordova-ios 7 (implicitly unwrapped)
+        // and cordova-ios 8 (nullable) without a force unwrap in the #else branch.
+        let result: CDVPluginResult? = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: data as [AnyHashable: Any])
+        #endif
+        result?.setKeepCallbackAs(true)
         let callbackId = self.callbackId
         sendOnMainThread {
-            self.plugin.commandDelegate.send(result, callbackId: callbackId)
+            if let result {
+                self.plugin.commandDelegate.send(result, callbackId: callbackId)
+            }
         }
     }
 
     func sendNoResultKeepAlive() {
-        let result = CDVPluginResult(status: CDVCommandStatus_NO_RESULT)!
-        result.setKeepCallbackAs(true)
+        #if SWIFT_PACKAGE
+        let result: CDVPluginResult? = CDVPluginResult(status: CDVCommandStatus_NO_RESULT)!
+        #else
+        let result: CDVPluginResult? = CDVPluginResult(status: CDVCommandStatus_NO_RESULT)
+        #endif
+        result?.setKeepCallbackAs(true)
         let callbackId = self.callbackId
         sendOnMainThread {
-            self.plugin.commandDelegate.send(result, callbackId: callbackId)
+            if let result {
+                self.plugin.commandDelegate.send(result, callbackId: callbackId)
+            }
         }
     }
 }
