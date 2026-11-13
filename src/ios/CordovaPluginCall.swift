@@ -197,7 +197,9 @@ class CordovaPluginCall {
         result?.setKeepCallbackAs(true)
         let callbackId = self.callbackId
         sendOnMainThread {
-            self.plugin.commandDelegate.send(result, callbackId: callbackId)
+            if let result {
+                self.plugin.commandDelegate.send(result, callbackId: callbackId)
+            }
         }
     }
 
@@ -210,7 +212,9 @@ class CordovaPluginCall {
         result?.setKeepCallbackAs(true)
         let callbackId = self.callbackId
         sendOnMainThread {
-            self.plugin.commandDelegate.send(result, callbackId: callbackId)
+            if let result {
+                self.plugin.commandDelegate.send(result, callbackId: callbackId)
+            }
         }
     }
 }
