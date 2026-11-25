@@ -88,6 +88,10 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
 
                 public var implementation = CapgoUpdater()
     private let pluginVersion: String = "8.2.14"
+    private let launchStartedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+    private let launchReportLock = NSLock()
+    private var launchStartReported = false
+    private var launchOutcomeReported = false
     static let updateUrlDefault = "https://plugin.capgo.app/updates"
     static let statsUrlDefault = "https://plugin.capgo.app/stats"
     static let channelUrlDefault = "https://plugin.capgo.app/channel_self"
@@ -411,6 +415,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
             let didResetCurrentBundle = self.resetCurrentBundleForNativeBuildChangeIfNeeded()
             self.cleanupObsoleteVersions(didResetCurrentBundle: didResetCurrentBundle)
         }
+        self.reportAppLaunchStart()
         self.reportNativeVersionStatsIfChanged()
 
         // Load the server
@@ -3220,6 +3225,53 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         )
     }
 
+    private func reportAppLaunchStart() {
+        guard !self.implementation.statsUrl.isEmpty, !launchStartReported else {
+            return
+        }
+        launchStartReported = true
+        self.implementation.sendStats(
+            action: "app_launch_start",
+            versionName: self.implementation.getCurrentBundle().getVersionName(),
+            oldVersionName: "",
+            metadata: [
+                "launch_started_at": String(launchStartedAtMs),
+                "source": "plugin_load"
+            ]
+        )
+    }
+
+    private func claimLaunchOutcome() -> Bool {
+        launchReportLock.lock()
+        defer { launchReportLock.unlock() }
+        guard !launchOutcomeReported else {
+            return false
+        }
+        launchOutcomeReported = true
+        return true
+    }
+
+    private func reportAppLaunchOutcome(_ bundle: BundleInfo, timedOut: Bool) {
+        guard !self.implementation.statsUrl.isEmpty, self.claimLaunchOutcome() else {
+            return
+        }
+        let duration = max(0, Int64(Date().timeIntervalSince1970 * 1000) - launchStartedAtMs)
+        var metadata = [
+            "duration_ms": String(duration),
+            "launch_started_at": String(launchStartedAtMs),
+            "source": timedOut ? "app_ready_timeout" : "notify_app_ready"
+        ]
+        if timedOut {
+            metadata["timeout_ms"] = String(appReadyTimeout)
+        }
+        self.implementation.sendStats(
+            action: timedOut ? "app_launch_timeout" : "app_launch_ready",
+            versionName: bundle.getVersionName(),
+            oldVersionName: "",
+            metadata: metadata
+        )
+    }
+
     func notifyAppReady(_ call: CAPPluginCall) {
         if !self.acceptsReadyCall(call) {
             logger.info("Ignoring notifyAppReady from a page that is no longer current")
@@ -3229,6 +3281,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
         self.semaphoreDown()
         let bundle = self.implementation.getCurrentBundle()
         self.implementation.setSuccess(bundle: bundle, autoDeletePrevious: self.autoDeletePrevious)
+        self.reportAppLaunchOutcome(bundle, timedOut: false)
         logger.info("Current bundle loaded successfully. [notifyAppReady was called] \(bundle.toString())")
         self.clearIncomingPreviewTransition()
         self.hidePreviewTransitionLoader(reason: "notify-app-ready")
@@ -3335,6 +3388,7 @@ public class CordovaUpdaterPlugin: CDVPlugin, CDVPluginSchemeHandler {
                 "bundle": current.toJSON()
             ])
             self.persistLastFailedBundle(current)
+            self.reportAppLaunchOutcome(current, timedOut: true)
             self.implementation.sendStats(action: "update_fail", versionName: current.getVersionName())
             self.implementation.setError(bundle: current)
             _ = self.performReset(toLastSuccessful: true, usePendingBundle: false, isInternal: true)

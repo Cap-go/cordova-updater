@@ -18,6 +18,10 @@ public class CordovaPlugin {
         return false;
     }
 
+    public Object onMessage(String id, Object data) {
+        return null;
+    }
+
     public CordovaPluginPathHandler getPathHandler() {
         return null;
     }

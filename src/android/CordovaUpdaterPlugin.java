@@ -25,6 +25,8 @@ import android.webkit.RenderProcessGoneDetail;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 import androidx.core.content.pm.PackageInfoCompat;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
 import com.google.android.gms.tasks.Task;
 // Play Store In-App Updates
 import com.google.android.play.core.appupdate.AppUpdateInfo;
@@ -59,6 +61,7 @@ import java.util.concurrent.Phaser;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 // Removed OkHttpClient and Protocol imports - using shared client in DownloadService instead
 import org.json.JSONArray;
@@ -251,6 +254,9 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     private volatile boolean readyGuardArmed = false;
     private volatile Thread appReadyCheck;
     private volatile long downloadStartTimeMs = 0;
+    private final long launchStartedAtMs = System.currentTimeMillis();
+    private boolean launchStartReported;
+    private final AtomicBoolean launchOutcomeReported = new AtomicBoolean();
     private static final long DOWNLOAD_TIMEOUT_MS = 600000; // 10 minute timeout
 
     private final Phaser semaphoreReady = new Phaser(0) {
@@ -277,7 +283,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     private FrameLayout previewTransitionLoaderOverlay;
     private Runnable previewTransitionLoaderTimeoutRunnable;
     private boolean previewTransitionLoaderRequested = false;
-    private Object webViewStatsListener;
+    private long webViewPageStartedAtMs;
     private PluginCall savedAppUpdateCall;
 
     // App lifecycle observer using ProcessLifecycleOwner for reliable foreground/background detection
@@ -922,6 +928,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             this.clearPreviewSessionForNativeBuildChange();
         }
         this.leavePreviewSessionForLaunchIntentIfNeeded();
+        this.reportAppLaunchStart();
         this.reportNativeVersionStatsIfChanged();
         this.reportPreviousAppExitReasons();
         this.reportPreviousWebViewRenderProcessGone();
@@ -1497,13 +1504,85 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     }
 
     private void installWebViewStatsReporter() {
-        // Cordova: WebView stats reporter uses evaluateJavascript only
-        if (cordova == null || getUpdaterWebView() == null) {
+        final android.webkit.WebView webView = getUpdaterWebView();
+        if (webView == null) {
             return;
         }
-        final android.webkit.WebView webView = getUpdaterWebView();
         final String script = buildWebViewStatsReporterScript();
-        webView.post(() -> webView.evaluateJavascript(script, null));
+        webView.post(() -> {
+            try {
+                if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                    WebViewCompat.addDocumentStartJavaScript(webView, script, java.util.Collections.singleton("*"));
+                }
+            } catch (final Exception e) {
+                logger.debug("Unable to install document-start WebView stats reporter: " + e.getMessage());
+            }
+            webView.evaluateJavascript(script, null);
+        });
+    }
+
+    @Override
+    public Object onMessage(final String id, final Object data) {
+        final boolean pageStarted = "onPageStarted".equals(id);
+        final boolean pageFinished = "onPageFinished".equals(id);
+        if (pageStarted || pageFinished) {
+            final android.webkit.WebView webView = getUpdaterWebView();
+            if (webView != null) {
+                if (pageStarted) {
+                    this.webViewPageStartedAtMs = System.currentTimeMillis();
+                } else {
+                    this.reportWebViewPageLoaded(data instanceof String ? (String) data : webView.getUrl());
+                }
+                final String script = buildWebViewStatsReporterScript();
+                webView.post(() -> webView.evaluateJavascript(script, null));
+            }
+        }
+        return super.onMessage(id, data);
+    }
+
+    private void reportWebViewPageLoaded(final String url) {
+        if (!this.hasStatsUrl()) {
+            return;
+        }
+        final Map<String, String> metadata = new HashMap<>();
+        metadata.put("source", "android_webview_listener");
+        final long pageStartedAt = this.webViewPageStartedAtMs;
+        if (pageStartedAt > 0) {
+            metadata.put("duration_ms", Long.toString(Math.max(0, System.currentTimeMillis() - pageStartedAt)));
+            metadata.put("page_started_at", Long.toString(pageStartedAt));
+        }
+        putStatsMetadataValue(metadata, "href", sanitizeStatsMetadataUrl(url), 512);
+        this.reportWebViewStats("webview_page_loaded", metadata);
+    }
+
+    private boolean hasStatsUrl() {
+        return this.implementation != null && this.implementation.statsUrl != null && !this.implementation.statsUrl.isEmpty();
+    }
+
+    private void reportAppLaunchStart() {
+        if (!this.hasStatsUrl() || this.launchStartReported) {
+            return;
+        }
+        this.launchStartReported = true;
+        final BundleInfo bundle = this.implementation.getCurrentBundle();
+        final Map<String, String> metadata = new HashMap<>();
+        metadata.put("launch_started_at", Long.toString(this.launchStartedAtMs));
+        metadata.put("source", "plugin_load");
+        this.implementation.sendStats("app_launch_start", bundle == null ? "" : bundle.getVersionName(), "", metadata);
+    }
+
+    private void reportAppLaunchOutcome(final BundleInfo bundle, final boolean timedOut, final long timeoutMs) {
+        if (!this.hasStatsUrl() || !this.launchOutcomeReported.compareAndSet(false, true)) {
+            return;
+        }
+        final Map<String, String> metadata = new HashMap<>();
+        metadata.put("duration_ms", Long.toString(Math.max(0, System.currentTimeMillis() - this.launchStartedAtMs)));
+        metadata.put("launch_started_at", Long.toString(this.launchStartedAtMs));
+        metadata.put("source", timedOut ? "app_ready_timeout" : "notify_app_ready");
+        if (timedOut) {
+            metadata.put("timeout_ms", Long.toString(timeoutMs));
+        }
+        this.implementation.sendStats(timedOut ? "app_launch_timeout" : "app_launch_ready", bundle.getVersionName(), "", metadata);
     }
 
     private Map<String, String> buildWebViewRenderProcessGoneMetadata(final RenderProcessGoneDetail detail) {
@@ -1611,6 +1690,9 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                 return "webview_render_process_gone";
             case "web_content_process_terminated":
                 return "webview_content_process_terminated";
+            case "webview_dom_content_loaded":
+            case "webview_page_loaded":
+                return type;
             case "javascript_error":
             default:
                 return "webview_javascript_error";
@@ -1629,6 +1711,8 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         putStatsMetadataValue(metadata, "href", sanitizeStatsMetadataUrl(data.optString("href", "")), 512);
         putStatsMetadataValue(metadata, "user_agent", data.optString("user_agent", ""), 256);
         putStatsMetadataValue(metadata, "session_id", data.optString("session_id", ""), 128);
+        putStatsMetadataValue(metadata, "duration_ms", data.optString("duration_ms", ""), 32);
+        putStatsMetadataValue(metadata, "page_started_at", data.optString("page_started_at", ""), 64);
         putStatsMetadataValue(metadata, "previous_session_id", data.optString("previous_session_id", ""), 128);
         putStatsMetadataValue(metadata, "previous_href", sanitizeStatsMetadataUrl(data.optString("previous_href", "")), 512);
         putStatsMetadataValue(metadata, "previous_started_at", data.optString("previous_started_at", ""), 64);
@@ -1743,6 +1827,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
     static String buildWebViewStatsReporterScript() {
         return (
             "(function(){" +
+            "if(window.top!==window){return;}" +
             "if(window.__capgoWebViewErrorReporterInstalled){return;}" +
             "window.__capgoWebViewErrorReporterInstalled=true;" +
             "var maxReports=20,sentReports=0,queue=[],seen={};" +
@@ -1761,13 +1846,16 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             "if(previous&&previous.active){send({type:'webview_unclean_restart',message:'WebView restarted without a clean page unload',previous_session_id:s(previous.id),previous_href:s(previous.href),previous_started_at:s(previous.started_at),previous_updated_at:s(previous.updated_at)});}" +
             "writeSession(true);" +
             "setInterval(function(){writeSession(true);},15000);" +
+            "function pageDuration(){var started=Number(window.__capgoWebViewSessionStartedAt||Date.now());return String(Math.max(0,Date.now()-started));}" +
             "function markClean(){writeSession(false);}" +
             "window.addEventListener('pagehide',markClean,true);" +
             "window.addEventListener('beforeunload',markClean,true);" +
             "window.addEventListener('error',function(event){var target=event&&event.target;if(target&&target!==window&&(target.src||target.href)){send({type:'resource_error',message:'Resource failed to load',source:s(target.src||target.href),tag_name:s(target.tagName)});return;}send({type:'javascript_error',message:s((event&&event.message)||(event&&event.error)),source:s(event&&event.filename),line:s(event&&event.lineno),column:s(event&&event.colno),stack:stack(event&&event.error)});},true);" +
             "window.addEventListener('unhandledrejection',function(event){var reason=event&&event.reason;send({type:'unhandled_rejection',message:s(reason),stack:stack(reason)});},true);" +
             "document.addEventListener('securitypolicyviolation',function(event){send({type:'security_policy_violation',message:s(event&&event.violatedDirective),source:s(event&&event.blockedURI)});},true);" +
-            "document.addEventListener('deviceready',scheduleFlush,false);" +
+            "function reportDomContentLoaded(){send({type:'webview_dom_content_loaded',message:'WebView DOM content loaded',duration_ms:pageDuration(),page_started_at:String(window.__capgoWebViewSessionStartedAt)});}" +
+            "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',reportDomContentLoaded,true);}else{reportDomContentLoaded();}" +
+            "document.addEventListener('deviceready',function(){setTimeout(scheduleFlush,0);},false);" +
             "setTimeout(scheduleFlush,0);" +
             "})();"
         );
@@ -4214,6 +4302,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             }
             final BundleInfo bundle = this.implementation.getCurrentBundle();
             this.implementation.setSuccess(bundle, this.autoDeletePrevious);
+            this.reportAppLaunchOutcome(bundle, false, 0);
             logger.info("Current bundle loaded successfully. ['notifyAppReady()' was called] " + bundle);
             logger.info("semaphoreReady countDown");
             this.semaphoreDown();
@@ -4885,7 +4974,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
         }
     }
 
-    private void checkRevert() {
+    private void checkRevert(final long waitTimeMs) {
         // Automatically roll back to fallback version if notifyAppReady has not been called yet
         final BundleInfo current = this.implementation.getCurrentBundle();
 
@@ -4906,6 +4995,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             ret.put("bundle", InternalUtils.mapToJSObject(current.toJSONMap()));
             this.persistLastFailedBundle(current);
             this.notifyJSListeners("updateFailed", ret);
+            this.reportAppLaunchOutcome(current, true, waitTimeMs);
             this.implementation.sendStats("update_fail", current.getVersionName());
             this.implementation.setError(current);
             this.performReset(true, false, true);
@@ -4939,7 +5029,7 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
             try {
                 logger.info("Wait for " + this.waitTimeMs + "ms, then check for notifyAppReady");
                 Thread.sleep(this.waitTimeMs);
-                CordovaUpdaterPlugin.this.checkRevert();
+                CordovaUpdaterPlugin.this.checkRevert(this.waitTimeMs);
                 CordovaUpdaterPlugin.this.clearAppReadyCheckIfCurrent(currentThread);
             } catch (final InterruptedException e) {
                 CordovaUpdaterPlugin.this.clearAppReadyCheckIfCurrent(currentThread);
@@ -5556,11 +5646,6 @@ public class CordovaUpdaterPlugin extends org.apache.cordova.CordovaPlugin imple
                 } catch (Exception e) {
                     logger.error("Failed to clean up AppLifecycleObserver: " + e.getMessage());
                 }
-            }
-
-            if (webViewStatsListener != null && cordova != null) {
-                // Cordova: no WebViewListener to remove
-                webViewStatsListener = null;
             }
         } catch (Exception e) {
             logger.error("Failed to run onDestroy: " + e.getMessage());
