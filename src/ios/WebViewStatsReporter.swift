@@ -23,8 +23,9 @@ final class WebViewStatsReporter {
       }
       function updater(){
         var cap=window.Capacitor;
-        if(!cap||!cap.Plugins){return null;}
-        return cap.Plugins.CapacitorUpdater||null;
+        if(cap&&cap.Plugins&&cap.Plugins.CapacitorUpdater){return cap.Plugins.CapacitorUpdater;}
+        if(window.cordova&&window.cordova.plugins&&window.cordova.plugins.Updater){return window.cordova.plugins.Updater;}
+        return null;
       }
       function flush(){
         var plugin=updater();
@@ -123,23 +124,33 @@ final class WebViewStatsReporter {
           source:s(event&&event.blockedURI)
         });
       },true);
-      document.addEventListener('DOMContentLoaded',function(){
+      function reportDomContentLoaded(){
         send({
           type:'webview_dom_content_loaded',
           message:'WebView DOM content loaded',
           duration_ms:pageDuration(),
           page_started_at:String(window.__capgoWebViewSessionStartedAt)
         });
-      },true);
-      window.addEventListener('load',function(){
+      }
+      if(document.readyState==='loading'){
+        document.addEventListener('DOMContentLoaded',reportDomContentLoaded,true);
+      }else{
+        reportDomContentLoaded();
+      }
+      function reportPageLoaded(){
         send({
           type:'webview_page_loaded',
           message:'WebView page loaded',
           duration_ms:pageDuration(),
           page_started_at:String(window.__capgoWebViewSessionStartedAt)
         });
-      },true);
-      document.addEventListener('deviceready',scheduleFlush,false);
+      }
+      if(document.readyState==='complete'){
+        reportPageLoaded();
+      }else{
+        window.addEventListener('load',reportPageLoaded,true);
+      }
+      document.addEventListener('deviceready',function(){setTimeout(scheduleFlush,0);},false);
       setTimeout(scheduleFlush,0);
     })();
     """
